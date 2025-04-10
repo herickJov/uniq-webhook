@@ -25,7 +25,6 @@ async def webhook_handler(request: Request):
     data = await request.json()
     logging.info(f"Payload recebido: {data}")
 
-    # Coleta dados
     payload = data.get("payload", {})
     subscribers = payload.get("subscribers", [])
     called = payload.get("called", "")
@@ -55,7 +54,7 @@ async def webhook_handler(request: Request):
             logging.warning(f"Nenhum contato encontrado para o número {numero}")
             return {"status": "no-contact"}
 
-        contato_id = contatos[0]['ID']
+        contato_id = int(contatos[0]['ID'])
 
         # Busca negócios vinculados ao contato e ao responsável
         negocios_res = requests.get(
@@ -73,7 +72,7 @@ async def webhook_handler(request: Request):
             logging.warning(f"Nenhum negócio encontrado para {numero} e responsável {bitrix_user_id}")
             return {"status": "no-deal"}
 
-        negocio_id = negocios[0]['ID']
+        negocio_id = int(negocios[0]['ID'])
 
         start = datetime.fromtimestamp(times.get("setup", 0)).isoformat()
         end = datetime.fromtimestamp(times.get("release", 0)).isoformat()
@@ -84,7 +83,9 @@ async def webhook_handler(request: Request):
                 "SUBJECT": f"Ligação via Uniq de {colaborador} para {numero}",
                 "COMMUNICATIONS": [{
                     "VALUE": numero,
-                    "TYPE": "PHONE"
+                    "TYPE": "PHONE",
+                    "ENTITY_TYPE_ID": 3,
+                    "ENTITY_ID": contato_id
                 }],
                 "BINDINGS": [{
                     "OWNER_ID": negocio_id,
