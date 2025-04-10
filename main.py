@@ -27,7 +27,7 @@ def normalizar_telefone(telefone: str) -> str:
         numero = numero[1:]
     return numero
 
-def buscar_negocio_por_telefone(telefone: str):
+def buscar_lead_ou_contato_por_telefone(telefone: str):
     telefone = normalizar_telefone(telefone)
 
     search_payload = {
@@ -40,51 +40,45 @@ def buscar_negocio_por_telefone(telefone: str):
         r.raise_for_status()
         data = r.json()
 
-        entity_id = None
         if data.get("result"):
-            if data["result"].get("CONTACT"):
-                entity_id = data["result"]["CONTACT"][0]
-                owner_type = "C"
-            elif data["result"].get("LEAD"):
-                entity_id = data["result"]["LEAD"][0]
-                owner_type = "L"
-            else:
-                return None
+            contatos = data["result"].get("CONTACT", [])
+            for contato_id in contatos:
+                res = requests.post(BITRIX_WEBHOOK_URL + "/crm.contact.get", json={"id": contato_id})
+                res.raise_for_status()
+                contato = res.json().get("result", {})
+                for fone in contato.get("PHONE", []):
+                    if normalizar_telefone(fone.get("VALUE", "")) == telefone:
+                        return {"type_id": 3, "id": contato_id}  # CONTACT
 
-            deal_filter = {
-                "filter": {
-                    f"{owner_type}ID": entity_id
-                },
-                "select": ["ID"],
-                "order": {"ID": "DESC"},
-                "start": 0
-            }
-            r = requests.post(BITRIX_WEBHOOK_URL + "/crm.deal.list", json=deal_filter)
-            r.raise_for_status()
-            deals = r.json().get("result", [])
-            if deals:
-                return int(deals[0]["ID"])
+            leads = data["result"].get("LEAD", [])
+            for lead_id in leads:
+                res = requests.post(BITRIX_WEBHOOK_URL + "/crm.lead.get", json={"id": lead_id})
+                res.raise_for_status()
+                lead = res.json().get("result", {})
+                for fone in lead.get("PHONE", []):
+                    if normalizar_telefone(fone.get("VALUE", "")) == telefone:
+                        return {"type_id": 1, "id": lead_id}  # LEAD
+
     except Exception as e:
-        logging.error("Erro ao buscar negócio: %s", e)
+        logging.error("Erro ao buscar lead/contato exato: %s", e)
 
     return None
 
 def registrar_atividade_chamada(called, colaborador, start_ts, end_ts):
-    negocio_id = buscar_negocio_por_telefone(called)
+    entidade = buscar_lead_ou_contato_por_telefone(called)
 
-    if not negocio_id:
-        logging.warning("Nenhum negócio encontrado para o número %s", called)
-        return {"status": "no-deal-found"}
+    if not entidade:
+        logging.warning("Nenhum lead ou contato exato encontrado para o número %s", called)
+        return {"status": "no-entity-found"}
 
     start_time_str = datetime.fromtimestamp(start_ts).isoformat()
     end_time_str = datetime.fromtimestamp(end_ts).isoformat()
-
     telefone_normalizado = normalizar_telefone(called)
 
     activity_payload = {
         "fields": {
-            "OWNER_ID": negocio_id,
-            "OWNER_TYPE_ID": 2,
+            "OWNER_ID": entidade["id"],
+            "OWNER_TYPE_ID": entidade["type_id"],
             "TYPE_ID": 2,
             "DIRECTION": 2,
             "SUBJECT": f"Chamada de {colaborador} para {telefone_normalizado}",
