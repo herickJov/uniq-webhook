@@ -83,16 +83,10 @@ async def webhook_handler(request: Request):
 
         activity_payload = {
             "fields": {
+                "OWNER_ID": negocio_id,
+                "OWNER_TYPE_ID": 2,
                 "TYPE_ID": 2,
                 "SUBJECT": f"Ligação via Uniq de {colaborador} para {numero}",
-                "COMMUNICATIONS": [
-                    {
-                        "VALUE": numero,
-                        "TYPE": "PHONE",
-                        "ENTITY_TYPE_ID": 3,
-                        "ENTITY_ID": contato_id
-                    }
-                ],
                 "BINDINGS": [
                     {
                         "OWNER_ID": negocio_id,
