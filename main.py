@@ -83,8 +83,8 @@ async def webhook_handler(request: Request):
                 "TYPE_ID": 2,
                 "SUBJECT": f"Ligação via Uniq de {colaborador} para {numero}",
                 "COMMUNICATIONS": [{
-                    "ENTITY_ID": contato_id,
-                    "ENTITY_TYPE_ID": 3
+                    "VALUE": numero,
+                    "TYPE": "PHONE"
                 }],
                 "BINDINGS": [{
                     "OWNER_ID": negocio_id,
