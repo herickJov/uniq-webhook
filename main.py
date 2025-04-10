@@ -8,7 +8,6 @@ logging.basicConfig(level=logging.INFO)
 
 BITRIX_WEBHOOK_BASE = "https://b24-rwd8iz.bitrix24.com.br/rest/94/as72rxtjh98pszj4"
 
-# Mapeamento de IDs Uniq -> Bitrix
 UNIQ_TO_BITRIX = {
     "1529": 36,
     "1557": 38,
@@ -44,10 +43,9 @@ async def webhook_handler(request: Request):
     numero = normalize_phone(called)
 
     try:
-        # Busca contatos com esse telefone
         contatos_res = requests.get(
             f"{BITRIX_WEBHOOK_BASE}/crm.contact.list",
-            params={"filter[PHONE]": numero, "select[]": "ID"}
+            params={"filter[PHONE]": numero, "select[]": ["ID", "NAME"]}
         )
         contatos = contatos_res.json().get("result", [])
         if not contatos:
@@ -55,24 +53,29 @@ async def webhook_handler(request: Request):
             return {"status": "no-contact"}
 
         contato_id = int(contatos[0]['ID'])
+        contato_nome = contatos[0]['NAME']
 
-        # Busca negócios vinculados ao contato e ao responsável
         negocios_res = requests.get(
             f"{BITRIX_WEBHOOK_BASE}/crm.deal.list",
             params={
                 "filter[CONTACT_ID]": contato_id,
-                "filter[ASSIGNED_BY_ID]": bitrix_user_id,
                 "filter[STAGE_SEMANTIC_ID]": "P",
-                "select[]": "ID"
+                "select[]": ["ID", "TITLE", "ASSIGNED_BY_ID"]
             }
         )
         negocios = negocios_res.json().get("result", [])
 
-        if not negocios:
-            logging.warning(f"Nenhum negócio encontrado para {numero} e responsável {bitrix_user_id}")
-            return {"status": "no-deal"}
+        negocio_id = None
+        negocio_titulo = ""
+        for deal in negocios:
+            if str(deal.get("ASSIGNED_BY_ID")) == str(bitrix_user_id):
+                negocio_id = int(deal['ID'])
+                negocio_titulo = deal['TITLE']
+                break
 
-        negocio_id = int(negocios[0]['ID'])
+        if not negocio_id:
+            logging.warning(f"Nenhum negócio encontrado para contato {numero} com responsável {bitrix_user_id}")
+            return {"status": "no-deal"}
 
         start = datetime.fromtimestamp(times.get("setup", 0)).isoformat()
         end = datetime.fromtimestamp(times.get("release", 0)).isoformat()
@@ -92,7 +95,7 @@ async def webhook_handler(request: Request):
                     "OWNER_TYPE_ID": 2
                 }],
                 "RESPONSIBLE_ID": bitrix_user_id,
-                "DESCRIPTION": f"Ligação registrada automaticamente via Uniq",
+                "DESCRIPTION": f"Ligação registrada automaticamente via Uniq\nContato: {contato_nome}\nNegócio: {negocio_titulo}",
                 "DESCRIPTION_TYPE": 3,
                 "START_TIME": start,
                 "END_TIME": end,
@@ -105,7 +108,11 @@ async def webhook_handler(request: Request):
             f"{BITRIX_WEBHOOK_BASE}/crm.activity.add",
             json=activity_payload
         )
+
         logging.info(f"Atividade registrada: {activity_res.json()}")
+        logging.info(f"Contato: {contato_nome} | ID: {contato_id} | Responsável: {bitrix_user_id}")
+        logging.info(f"Negócio usado: {negocio_titulo} | ID: {negocio_id}")
+
         return {"status": "ok"}
 
     except Exception as e:
