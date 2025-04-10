@@ -1,120 +1,79 @@
+import json
+import uvicorn
 from fastapi import FastAPI, Request
-import requests
+import httpx
 import logging
-from datetime import datetime
 
-app = FastAPI()
 logging.basicConfig(level=logging.INFO)
+app = FastAPI()
 
-BITRIX_WEBHOOK_BASE = "https://b24-rwd8iz.bitrix24.com.br/rest/94/as72rxtjh98pszj4"
+BITRIX_WEBHOOK = "https://seusubdominio.bitrix24.com/rest/1/chavewebhook/"
+HEADERS = {"Content-Type": "application/json"}
 
-UNIQ_TO_BITRIX = {
-    "1529": 36,
-    "1557": 38,
-    "1560": 34,
-    "1520": 30,
-    "1810": 94
-}
-
-def normalize_phone(phone):
-    return phone.lstrip("0")
+OWNER_TYPE_ID_DEAL = 2
+ACTIVITY_TYPE_CALL = 2
 
 @app.post("/webhook")
-async def webhook_handler(request: Request):
-    data = await request.json()
-    logging.info(f"Payload recebido: {data}")
+async def handle_webhook(request: Request):
+    payload = await request.json()
+    logging.info("Payload recebido: %s", payload)
 
-    payload = data.get("payload", {})
-    subscribers = payload.get("subscribers", [])
-    called = payload.get("called", "")
-    times = payload.get("times", {})
+    phone_number = payload.get("caller_id")
+    call_start = payload.get("start")
 
-    if not subscribers or not called:
-        return {"status": "invalid-payload"}
+    if not phone_number:
+        return {"error": "caller_id ausente"}
 
-    colaborador = subscribers[0].get("display", "Desconhecido")
-    ramal = subscribers[0].get("number", "")
-    bitrix_user_id = UNIQ_TO_BITRIX.get(ramal)
-
-    if not bitrix_user_id:
-        logging.warning(f"Ramal {ramal} não mapeado para usuário Bitrix")
-        return {"status": "user-not-mapped"}
-
-    numero = normalize_phone(called)
-
-    try:
-        contatos_res = requests.get(
-            f"{BITRIX_WEBHOOK_BASE}/crm.contact.list",
-            params={"filter[PHONE]": numero, "select[]": ["ID", "NAME"]}
-        )
-        contatos = contatos_res.json().get("result", [])
-        if not contatos:
-            logging.warning(f"Nenhum contato encontrado para o número {numero}")
-            return {"status": "no-contact"}
-
-        contato_id = int(contatos[0]['ID'])
-        contato_nome = contatos[0]['NAME']
-
-        negocios_res = requests.get(
-            f"{BITRIX_WEBHOOK_BASE}/crm.deal.list",
-            params={
-                "filter[CONTACT_ID]": contato_id,
-                "filter[STAGE_SEMANTIC_ID]": "P",
-                "select[]": ["ID", "TITLE", "ASSIGNED_BY_ID"]
+    # 1. Buscar negócios relacionados ao telefone
+    async with httpx.AsyncClient() as client:
+        deal_search_response = await client.post(
+            BITRIX_WEBHOOK + "crm.deal.list",
+            headers=HEADERS,
+            json={
+                "filter": {"PHONE": phone_number},
+                "select": ["ID", "TITLE"]
             }
         )
-        negocios = negocios_res.json().get("result", [])
 
-        negocio_id = None
-        negocio_titulo = ""
-        for deal in negocios:
-            if str(deal.get("ASSIGNED_BY_ID")) == str(bitrix_user_id):
-                negocio_id = int(deal['ID'])
-                negocio_titulo = deal['TITLE']
-                break
+    deals = deal_search_response.json().get("result", [])
 
-        if not negocio_id:
-            logging.warning(f"Nenhum negócio encontrado para contato {numero} com responsável {bitrix_user_id}")
-            return {"status": "no-deal"}
+    if not deals:
+        logging.warning("Nenhum negócio encontrado para o número: %s", phone_number)
+        return {"message": "Sem negócio correspondente"}
 
-        start = datetime.fromtimestamp(times.get("setup", 0)).isoformat()
-        end = datetime.fromtimestamp(times.get("release", 0)).isoformat()
+    deal_id = deals[0]["ID"]
+    logging.info("Negócio encontrado: %s", deal_id)
 
-        activity_payload = {
-            "fields": {
-                "TYPE_ID": 2,
-                "SUBJECT": f"Ligação via Uniq de {colaborador} para {numero}",
-                "COMMUNICATIONS": [{
-                    "VALUE": numero,
-                    "TYPE": "PHONE",
-                    "ENTITY_TYPE_ID": 3,
-                    "ENTITY_ID": contato_id
-                }],
-                "BINDINGS": [{
-                    "OWNER_ID": negocio_id,
-                    "OWNER_TYPE_ID": 2
-                }],
-                "RESPONSIBLE_ID": bitrix_user_id,
-                "DESCRIPTION": f"Ligação registrada automaticamente via Uniq\nContato: {contato_nome}\nNegócio: {negocio_titulo}",
-                "DESCRIPTION_TYPE": 3,
-                "START_TIME": start,
-                "END_TIME": end,
-                "COMPLETED": "Y",
-                "DIRECTION": 2
-            }
+    # 2. Criar atividade ligada ao negócio
+    atividade_payload = {
+        "fields": {
+            "OWNER_ID": deal_id,
+            "OWNER_TYPE_ID": OWNER_TYPE_ID_DEAL,
+            "TYPE_ID": ACTIVITY_TYPE_CALL,
+            "SUBJECT": f"Ligação recebida via Uniq - {call_start}",
+            "DESCRIPTION": f"Ligação recebida do número: {phone_number}",
+            "DESCRIPTION_TYPE": 1,
+            "DIRECTION": 1,
+            "COMPLETED": "Y",
+            "COMMUNICATIONS": [
+                {
+                    "VALUE": phone_number,
+                    "TYPE": "PHONE"
+                }
+            ]
         }
+    }
 
-        activity_res = requests.post(
-            f"{BITRIX_WEBHOOK_BASE}/crm.activity.add",
-            json=activity_payload
+    async with httpx.AsyncClient() as client:
+        activity_response = await client.post(
+            BITRIX_WEBHOOK + "crm.activity.add",
+            headers=HEADERS,
+            json=atividade_payload
         )
 
-        logging.info(f"Atividade registrada: {activity_res.json()}")
-        logging.info(f"Contato: {contato_nome} | ID: {contato_id} | Responsável: {bitrix_user_id}")
-        logging.info(f"Negócio usado: {negocio_titulo} | ID: {negocio_id}")
+    result = activity_response.json()
+    logging.info("Atividade registrada: %s", result)
+    return result
 
-        return {"status": "ok"}
-
-    except Exception as e:
-        logging.error(f"Erro: {e}")
-        return {"status": "error", "detail": str(e)}
+if __name__ == "__main__":
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
