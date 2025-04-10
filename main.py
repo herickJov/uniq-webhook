@@ -1,9 +1,7 @@
-import json
+import os
 import logging
-import time
-from datetime import datetime
-
 import requests
+from datetime import datetime
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -19,9 +17,9 @@ app.add_middleware(
 
 logging.basicConfig(level=logging.INFO)
 
-BITRIX_WEBHOOK_URL = "https://b24-rwd8iz.bitrix24.com.br/rest/94/as72rxtjh98pszj4"
+BITRIX_WEBHOOK_URL = os.getenv("BITRIX_WEBHOOK_URL")
 
-USERS_MAP = {
+UNIQ_TO_BITRIX_USER_IDS = {
     "1529": 36,
     "1557": 38,
     "1560": 34,
@@ -29,125 +27,87 @@ USERS_MAP = {
     "1810": 94,
 }
 
-def normalizar_telefone(telefone: str) -> str:
-    numero = telefone.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
-    if numero.startswith("0") and len(numero) >= 11:
-        numero = numero[1:]
-    return numero
+def normalize_phone(phone):
+    if phone.startswith("0"):
+        return phone[1:]
+    return phone
 
-def buscar_negocio_por_telefone_e_responsavel(telefone: str, user_id: int):
-    telefone = normalizar_telefone(telefone)
-
-    search_payload = {
-        "type": "PHONE",
-        "values": [telefone]
+def find_deal_by_phone_and_responsible(phone, responsible_id):
+    url = f"{BITRIX_WEBHOOK_URL}/crm.deal.list"
+    params = {
+        "filter[TYPE_ID]": "SALE",
+        "filter[STAGE_SEMANTIC_ID]": "P",
+        "filter[ASSIGNED_BY_ID]": responsible_id,
+        "filter[%CONTACT.PHONE]": phone,
+        "select[]": "ID"
     }
-
-    try:
-        r = requests.post(BITRIX_WEBHOOK_URL + "/crm.duplicate.findbycomm", json=search_payload)
-        r.raise_for_status()
-        data = r.json()
-
-        entidades = []
-        if data.get("result"):
-            contatos = data["result"].get("CONTACT", [])
-            for contato_id in contatos:
-                res = requests.post(BITRIX_WEBHOOK_URL + "/crm.contact.get", json={"id": contato_id})
-                res.raise_for_status()
-                contato = res.json().get("result", {})
-                for fone in contato.get("PHONE", []):
-                    if normalizar_telefone(fone.get("VALUE", "")) == telefone:
-                        entidades.append(("CONTACT_ID", contato_id))
-
-            leads = data["result"].get("LEAD", [])
-            for lead_id in leads:
-                res = requests.post(BITRIX_WEBHOOK_URL + "/crm.lead.get", json={"id": lead_id})
-                res.raise_for_status()
-                lead = res.json().get("result", {})
-                for fone in lead.get("PHONE", []):
-                    if normalizar_telefone(fone.get("VALUE", "")) == telefone:
-                        entidades.append(("LEAD_ID", lead_id))
-
-        for tipo_id, valor in entidades:
-            filtro = {
-                "filter": {tipo_id: valor},
-                "select": ["ID", "TITLE", "ASSIGNED_BY_ID"],
-                "order": {"ID": "DESC"},
-            }
-            deals = requests.post(BITRIX_WEBHOOK_URL + "/crm.deal.list", json=filtro)
-            deals.raise_for_status()
-            for deal in deals.json().get("result", []):
-                if deal.get("ASSIGNED_BY_ID") == user_id:
-                    return int(deal["ID"])
-
-    except Exception as e:
-        logging.error("Erro ao buscar negócio por telefone e usuário: %s", e)
-
+    response = requests.get(url, params=params)
+    deals = response.json().get("result", [])
+    if deals:
+        return deals[0]["ID"]
     return None
 
-def registrar_atividade_chamada(called, colaborador, start_ts, end_ts, ramal):
-    user_id = USERS_MAP.get(ramal)
-    if not user_id:
-        logging.warning("Ramal %s não mapeado para Bitrix user", ramal)
-        return {"status": "unknown-user"}
-
-    deal_id = buscar_negocio_por_telefone_e_responsavel(called, user_id)
-    if not deal_id:
-        logging.warning("Nenhum negócio encontrado para %s com responsável %s", called, user_id)
-        return {"status": "no-deal-found"}
-
-    start_time_str = datetime.fromtimestamp(start_ts).isoformat()
-    end_time_str = datetime.fromtimestamp(end_ts).isoformat()
-    telefone_normalizado = normalizar_telefone(called)
-
-    activity_payload = {
-        "fields": {
-            "OWNER_ID": deal_id,
-            "OWNER_TYPE_ID": 2,
-            "TYPE_ID": 2,
-            "DIRECTION": 2,
-            "SUBJECT": f"Chamada de {colaborador} para {telefone_normalizado}",
-            "COMPLETED": "Y",
-            "DESCRIPTION": f"Ligação realizada por {colaborador} via Uniq",
-            "DESCRIPTION_TYPE": 1,
-            "COMMUNICATIONS": [{"VALUE": telefone_normalizado, "TYPE": "PHONE"}],
-            "START_TIME": start_time_str,
-            "END_TIME": end_time_str
-        }
-    }
-
+def log_call_to_bitrix(data):
     try:
-        logging.info("Enviando para Bitrix: %s", json.dumps(activity_payload, indent=2))
-        res = requests.post(BITRIX_WEBHOOK_URL + "/crm.activity.add", json=activity_payload)
-        res.raise_for_status()
-        logging.info("Resposta Bitrix24: %s", res.json())
-        return res.json()
+        sessions = data["payload"].get("sessions", [])
+        subscribers = data["payload"].get("subscribers", [])
+        segments = data["payload"].get("segments", [])
+
+        caller_session = next((s for s in sessions if s["direction"] == "INGRESS"), {})
+        callee_session = next((s for s in sessions if s["direction"] == "EGRESS"), {})
+        caller_subscriber_id = caller_session.get("subscriber", "")
+        callee_subscriber_id = callee_session.get("subscriber", "")
+
+        caller_number = next((s["number"] for s in subscribers if s["id"] == caller_subscriber_id), "")
+        callee_number = next((s["number"] for s in subscribers if s["id"] == callee_subscriber_id), "")
+        caller_name = next((s["display"] for s in subscribers if s["id"] == caller_subscriber_id), "")
+
+        uniq_id = caller_number
+        responsible_id = UNIQ_TO_BITRIX_USER_IDS.get(uniq_id)
+        if not responsible_id:
+            logging.warning(f"Responsável não encontrado para uniq_id {uniq_id}")
+            return
+
+        normalized_number = normalize_phone(callee_number)
+        deal_id = find_deal_by_phone_and_responsible(normalized_number, responsible_id)
+        if not deal_id:
+            logging.warning(f"Nenhum negócio encontrado para {normalized_number} com responsável {responsible_id}")
+            return
+
+        start = datetime.utcfromtimestamp(data["payload"]["time_start"])
+        end = datetime.utcfromtimestamp(data["payload"]["times"]["release"])
+
+        call_data = {
+            "fields": {
+                "OWNER_ID": deal_id,
+                "OWNER_TYPE_ID": 2,
+                "TYPE_ID": 2,
+                "DIRECTION": 2,
+                "SUBJECT": f"Chamada de {caller_name} para {callee_number}",
+                "COMPLETED": "Y",
+                "DESCRIPTION": f"Ligação realizada por {caller_name} via Uniq",
+                "DESCRIPTION_TYPE": 1,
+                "COMMUNICATIONS": [
+                    {
+                        "VALUE": callee_number,
+                        "TYPE": "PHONE"
+                    }
+                ],
+                "START_TIME": start.isoformat(),
+                "END_TIME": end.isoformat(),
+                "RESPONSIBLE_ID": responsible_id
+            }
+        }
+
+        requests.post(f"{BITRIX_WEBHOOK_URL}/crm.activity.add", json=call_data)
+        logging.info("Registro adicionado no negócio com sucesso")
+
     except Exception as e:
-        logging.error("Erro ao enviar atividade para Bitrix: %s", e)
-        return {"status": "bitrix-error", "error": str(e)}
+        logging.error(f"Erro ao processar chamada: {e}")
 
-@app.post("/webhook")
-async def receive_webhook(request: Request):
+@app.post("/uniq-calls")
+async def receive_call(request: Request):
     body = await request.json()
-    logging.info("===== NOVA REQUISIÇÃO RECEBIDA =====")
-    logging.info("Body: %s", body)
-
-    if body.get("type") == "CALL":
-        payload = body.get("payload", {})
-        called = payload.get("called")
-        start = payload.get("times", {}).get("setup", time.time())
-        end = payload.get("times", {}).get("release", time.time())
-        subscribers = payload.get("subscribers", [])
-        colaborador = subscribers[0].get("display") if subscribers else "Desconhecido"
-        ramal = subscribers[0].get("number") if subscribers else None
-
-        resultado = registrar_atividade_chamada(
-            called=called,
-            colaborador=colaborador,
-            start_ts=start,
-            end_ts=end,
-            ramal=ramal
-        )
-        return resultado
-
-    return {"status": "ignored"}
+    logging.info(f"Body: {body}")
+    log_call_to_bitrix(body)
+    return {"status": "received"}
