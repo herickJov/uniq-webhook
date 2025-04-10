@@ -1,99 +1,125 @@
-import json
-import uvicorn
 from fastapi import FastAPI, Request
 import requests
 import logging
+from datetime import datetime
 
-logging.basicConfig(level=logging.INFO)
 app = FastAPI()
+logging.basicConfig(level=logging.INFO)
 
-BITRIX_WEBHOOK = "https://b24-rwd8iz.bitrix24.com.br/rest/94/as72rxtjh98pszj4/"
-HEADERS = {"Content-Type": "application/json"}
+BITRIX_WEBHOOK_BASE = "https://b24-rwd8iz.bitrix24.com.br/rest/94/as72rxtjh98pszj4"
 
-OWNER_TYPE_ID_DEAL = 2
-ACTIVITY_TYPE_CALL = 2
+UNIQ_TO_BITRIX = {
+    "1529": 36,
+    "1557": 38,
+    "1560": 34,
+    "1520": 30,
+    "1810": 94
+}
+
+def normalize_phone(phone):
+    return phone.lstrip("0")
 
 @app.post("/webhook")
-async def handle_webhook(request: Request):
-    payload = await request.json()
-    logging.info("Payload recebido: %s", payload)
+async def webhook_handler(request: Request):
+    data = await request.json()
+    logging.info(f"Payload recebido: {data}")
 
-    phone_number = payload.get("caller_id")
-    call_start = payload.get("start")
-    colaborador = payload.get("agent_name", "Desconhecido")
-    user_id = payload.get("user_id")
+    payload = data.get("payload", {})
+    subscribers = payload.get("subscribers", [])
+    called = payload.get("called", "")
+    times = payload.get("times", {})
 
-    if not phone_number:
-        return {"error": "caller_id ausente"}
+    if not subscribers or not called:
+        return {"status": "invalid-payload"}
 
-    contact_search_response = requests.post(
-        BITRIX_WEBHOOK + "crm.contact.list.json",
-        headers=HEADERS,
-        json={
-            "filter": {"PHONE": phone_number},
-            "select": ["ID", "NAME"]
+    colaborador = subscribers[0].get("display", "Desconhecido")
+    ramal = subscribers[0].get("number", "")
+    bitrix_user_id = UNIQ_TO_BITRIX.get(ramal)
+
+    if not bitrix_user_id:
+        logging.warning(f"Ramal {ramal} não mapeado para usuário Bitrix")
+        return {"status": "user-not-mapped"}
+
+    numero = normalize_phone(called)
+
+    try:
+        contatos_res = requests.get(
+            f"{BITRIX_WEBHOOK_BASE}/crm.contact.list.json",
+            params={"filter[PHONE]": numero, "select[]": ["ID", "NAME"]}
+        )
+        contatos = contatos_res.json().get("result", [])
+        if not contatos:
+            logging.warning(f"Nenhum contato encontrado para o número {numero}")
+            return {"status": "no-contact"}
+
+        contato_id = int(contatos[0]['ID'])
+        contato_nome = contatos[0]['NAME']
+
+        negocios_res = requests.get(
+            f"{BITRIX_WEBHOOK_BASE}/crm.deal.list.json",
+            params={
+                "filter[CONTACT_ID]": contato_id,
+                "filter[ASSIGNED_BY_ID]": bitrix_user_id,
+                "filter[STAGE_SEMANTIC_ID]": "P",
+                "select[]": ["ID", "TITLE", "ASSIGNED_BY_ID"]
+            }
+        )
+        negocios = negocios_res.json().get("result", [])
+
+        negocio_id = None
+        negocio_titulo = ""
+        for deal in negocios:
+            if str(deal.get("ASSIGNED_BY_ID")) == str(bitrix_user_id):
+                negocio_id = int(deal['ID'])
+                negocio_titulo = deal['TITLE']
+                break
+
+        if not negocio_id:
+            logging.warning(f"Nenhum negócio encontrado para contato {numero} com responsável {bitrix_user_id}")
+            return {"status": "no-deal"}
+
+        start = datetime.fromtimestamp(times.get("setup", 0)).isoformat()
+        end = datetime.fromtimestamp(times.get("release", 0)).isoformat()
+
+        activity_payload = {
+            "fields": {
+                "TYPE_ID": 2,
+                "SUBJECT": f"Ligação via Uniq de {colaborador} para {numero}",
+                "COMMUNICATIONS": [
+                    {
+                        "VALUE": numero,
+                        "TYPE": "PHONE",
+                        "ENTITY_TYPE_ID": 3,
+                        "ENTITY_ID": contato_id
+                    }
+                ],
+                "BINDINGS": [
+                    {
+                        "OWNER_ID": negocio_id,
+                        "OWNER_TYPE_ID": 2
+                    }
+                ],
+                "RESPONSIBLE_ID": bitrix_user_id,
+                "DESCRIPTION": f"Ligação registrada automaticamente via Uniq\nContato: {contato_nome}\nNegócio: {negocio_titulo}",
+                "DESCRIPTION_TYPE": 3,
+                "START_TIME": start,
+                "END_TIME": end,
+                "COMPLETED": "Y",
+                "DIRECTION": 2
+            }
         }
-    )
 
-    contacts = contact_search_response.json().get("result", [])
+        activity_res = requests.post(
+            f"{BITRIX_WEBHOOK_BASE}/crm.activity.add.json",
+            json=activity_payload
+        )
 
-    if not contacts:
-        logging.warning("Nenhum contato encontrado para o número: %s", phone_number)
-        return {"message": "Sem contato correspondente"}
+        logging.info(f"Atividade registrada: {activity_res.json()}")
+        logging.info(f"Contato: {contato_nome} | ID: {contato_id} | Responsável: {bitrix_user_id}")
+        logging.info(f"Negócio usado: {negocio_titulo} | ID: {negocio_id}")
 
-    contact_id = contacts[0]["ID"]
+        return {"status": "ok"}
 
-    deal_search_response = requests.post(
-        BITRIX_WEBHOOK + "crm.deal.list.json",
-        headers=HEADERS,
-        json={
-            "filter": {
-                "CONTACT_ID": contact_id,
-                "ASSIGNED_BY_ID": user_id,
-                "STAGE_SEMANTIC_ID": "P"
-            },
-            "select": ["ID", "TITLE"]
-        }
-    )
-
-    deals = deal_search_response.json().get("result", [])
-
-    if not deals:
-        logging.warning("Nenhum negócio encontrado para o número: %s e responsável: %s", phone_number, user_id)
-        return {"message": "Sem negócio correspondente para esse responsável"}
-
-    deal_id = deals[0]["ID"]
-    logging.info("Negócio encontrado: %s", deal_id)
-
-    atividade_payload = {
-        "fields": {
-            "OWNER_ID": deal_id,
-            "OWNER_TYPE_ID": OWNER_TYPE_ID_DEAL,
-            "TYPE_ID": ACTIVITY_TYPE_CALL,
-            "SUBJECT": f"Ligação recebida via Uniq de {colaborador} - {call_start}",
-            "DESCRIPTION": f"Ligação recebida de {phone_number} por {colaborador}",
-            "DESCRIPTION_TYPE": 1,
-            "DIRECTION": 1,
-            "RESPONSIBLE_ID": user_id,
-            "COMPLETED": "Y",
-            "COMMUNICATIONS": [
-                {
-                    "VALUE": phone_number,
-                    "TYPE": "PHONE"
-                }
-            ]
-        }
-    }
-
-    activity_response = requests.post(
-        BITRIX_WEBHOOK + "crm.activity.add.json",
-        headers=HEADERS,
-        json=atividade_payload
-    )
-
-    result = activity_response.json()
-    logging.info("Atividade registrada: %s", result)
-    return result
-
-if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    except Exception as e:
+        logging.error(f"Erro: {e}")
+        return {"status": "error", "detail": str(e)}
