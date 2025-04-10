@@ -1,79 +1,52 @@
-import json
-import uvicorn
-from fastapi import FastAPI, Request
-import httpx
 import logging
+import requests
+from fastapi import FastAPI, Request
+from datetime import datetime
+from pytz import timezone
 
-logging.basicConfig(level=logging.INFO)
 app = FastAPI()
+logging.basicConfig(level=logging.INFO)
 
-BITRIX_WEBHOOK = "https://seusubdominio.bitrix24.com/rest/1/chavewebhook/"
-HEADERS = {"Content-Type": "application/json"}
-
-OWNER_TYPE_ID_DEAL = 2
-ACTIVITY_TYPE_CALL = 2
+BITRIX_WEBHOOK = "https://SEUDOMINIO.bitrix24.com/rest/ID/CHAVE/"
+BITRIX_TIMEZONE = timezone("America/Sao_Paulo")
 
 @app.post("/webhook")
-async def handle_webhook(request: Request):
-    payload = await request.json()
-    logging.info("Payload recebido: %s", payload)
+async def webhook(request: Request):
+    data = await request.json()
+    logging.info(f"Payload recebido: {data}")
 
-    phone_number = payload.get("caller_id")
-    call_start = payload.get("start")
+    call_number = data.get("caller_id_number")
+    call_type = data.get("direction")  # inbound ou outbound
 
-    if not phone_number:
-        return {"error": "caller_id ausente"}
+    if not call_number:
+        return {"error": "Número não encontrado no payload."}
 
-    # 1. Buscar negócios relacionados ao telefone
-    async with httpx.AsyncClient() as client:
-        deal_search_response = await client.post(
-            BITRIX_WEBHOOK + "crm.deal.list",
-            headers=HEADERS,
-            json={
-                "filter": {"PHONE": phone_number},
-                "select": ["ID", "TITLE"]
-            }
-        )
+    response = requests.post(BITRIX_WEBHOOK + "crm.deal.list.json", json={
+        "filter": {"PHONE": call_number},
+        "select": ["ID", "TITLE"]
+    })
 
-    deals = deal_search_response.json().get("result", [])
-
+    deals = response.json().get("result", [])
     if not deals:
-        logging.warning("Nenhum negócio encontrado para o número: %s", phone_number)
-        return {"message": "Sem negócio correspondente"}
+        return {"error": "Nenhum negócio encontrado com esse número."}
 
-    deal_id = deals[0]["ID"]
-    logging.info("Negócio encontrado: %s", deal_id)
-
-    # 2. Criar atividade ligada ao negócio
-    atividade_payload = {
+    deal_id = deals[0]['ID']
+    agora = datetime.now(BITRIX_TIMEZONE)
+    
+    resultado = requests.post(BITRIX_WEBHOOK + "crm.activity.add.json", json={
         "fields": {
             "OWNER_ID": deal_id,
-            "OWNER_TYPE_ID": OWNER_TYPE_ID_DEAL,
-            "TYPE_ID": ACTIVITY_TYPE_CALL,
-            "SUBJECT": f"Ligação recebida via Uniq - {call_start}",
-            "DESCRIPTION": f"Ligação recebida do número: {phone_number}",
-            "DESCRIPTION_TYPE": 1,
-            "DIRECTION": 1,
+            "OWNER_TYPE_ID": 2,  # 2 = Negócio
+            "TYPE_ID": 2,  # 2 = Chamada telefônica
+            "SUBJECT": f"Ligação {call_type} recebida via Uniq - {agora.strftime('%Y-%m-%d %H:%M:%S')}",
+            "START_TIME": agora.isoformat(),
+            "END_TIME": agora.isoformat(),
             "COMPLETED": "Y",
             "COMMUNICATIONS": [
-                {
-                    "VALUE": phone_number,
-                    "TYPE": "PHONE"
-                }
+                {"VALUE": call_number, "TYPE": "PHONE"}
             ]
         }
-    }
+    })
 
-    async with httpx.AsyncClient() as client:
-        activity_response = await client.post(
-            BITRIX_WEBHOOK + "crm.activity.add",
-            headers=HEADERS,
-            json=atividade_payload
-        )
-
-    result = activity_response.json()
-    logging.info("Atividade registrada: %s", result)
-    return result
-
-if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    logging.info(f"Atividade registrada: {resultado.json()}")
+    return resultado.json()
