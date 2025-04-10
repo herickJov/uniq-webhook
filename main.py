@@ -21,13 +21,21 @@ logging.basicConfig(level=logging.INFO)
 
 BITRIX_WEBHOOK_URL = "https://b24-rwd8iz.bitrix24.com.br/rest/94/as72rxtjh98pszj4"
 
+USERS_MAP = {
+    "1529": 36,
+    "1557": 38,
+    "1560": 34,
+    "1520": 30,
+    "1810": 94,
+}
+
 def normalizar_telefone(telefone: str) -> str:
     numero = telefone.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
     if numero.startswith("0") and len(numero) >= 11:
         numero = numero[1:]
     return numero
 
-def buscar_lead_ou_contato_por_telefone(telefone: str):
+def buscar_negocio_por_telefone_e_responsavel(telefone: str, user_id: int):
     telefone = normalizar_telefone(telefone)
 
     search_payload = {
@@ -40,6 +48,7 @@ def buscar_lead_ou_contato_por_telefone(telefone: str):
         r.raise_for_status()
         data = r.json()
 
+        entidades = []
         if data.get("result"):
             contatos = data["result"].get("CONTACT", [])
             for contato_id in contatos:
@@ -48,7 +57,7 @@ def buscar_lead_ou_contato_por_telefone(telefone: str):
                 contato = res.json().get("result", {})
                 for fone in contato.get("PHONE", []):
                     if normalizar_telefone(fone.get("VALUE", "")) == telefone:
-                        return {"type_id": 3, "id": contato_id}  # CONTACT
+                        entidades.append(("CONTACT_ID", contato_id))
 
             leads = data["result"].get("LEAD", [])
             for lead_id in leads:
@@ -57,19 +66,35 @@ def buscar_lead_ou_contato_por_telefone(telefone: str):
                 lead = res.json().get("result", {})
                 for fone in lead.get("PHONE", []):
                     if normalizar_telefone(fone.get("VALUE", "")) == telefone:
-                        return {"type_id": 1, "id": lead_id}  # LEAD
+                        entidades.append(("LEAD_ID", lead_id))
+
+        for tipo_id, valor in entidades:
+            filtro = {
+                "filter": {tipo_id: valor},
+                "select": ["ID", "TITLE", "ASSIGNED_BY_ID"],
+                "order": {"ID": "DESC"},
+            }
+            deals = requests.post(BITRIX_WEBHOOK_URL + "/crm.deal.list", json=filtro)
+            deals.raise_for_status()
+            for deal in deals.json().get("result", []):
+                if deal.get("ASSIGNED_BY_ID") == user_id:
+                    return int(deal["ID"])
 
     except Exception as e:
-        logging.error("Erro ao buscar lead/contato exato: %s", e)
+        logging.error("Erro ao buscar negócio por telefone e usuário: %s", e)
 
     return None
 
-def registrar_atividade_chamada(called, colaborador, start_ts, end_ts):
-    entidade = buscar_lead_ou_contato_por_telefone(called)
+def registrar_atividade_chamada(called, colaborador, start_ts, end_ts, ramal):
+    user_id = USERS_MAP.get(ramal)
+    if not user_id:
+        logging.warning("Ramal %s não mapeado para Bitrix user", ramal)
+        return {"status": "unknown-user"}
 
-    if not entidade:
-        logging.warning("Nenhum lead ou contato exato encontrado para o número %s", called)
-        return {"status": "no-entity-found"}
+    deal_id = buscar_negocio_por_telefone_e_responsavel(called, user_id)
+    if not deal_id:
+        logging.warning("Nenhum negócio encontrado para %s com responsável %s", called, user_id)
+        return {"status": "no-deal-found"}
 
     start_time_str = datetime.fromtimestamp(start_ts).isoformat()
     end_time_str = datetime.fromtimestamp(end_ts).isoformat()
@@ -77,8 +102,8 @@ def registrar_atividade_chamada(called, colaborador, start_ts, end_ts):
 
     activity_payload = {
         "fields": {
-            "OWNER_ID": entidade["id"],
-            "OWNER_TYPE_ID": entidade["type_id"],
+            "OWNER_ID": deal_id,
+            "OWNER_TYPE_ID": 2,
             "TYPE_ID": 2,
             "DIRECTION": 2,
             "SUBJECT": f"Chamada de {colaborador} para {telefone_normalizado}",
@@ -114,12 +139,14 @@ async def receive_webhook(request: Request):
         end = payload.get("times", {}).get("release", time.time())
         subscribers = payload.get("subscribers", [])
         colaborador = subscribers[0].get("display") if subscribers else "Desconhecido"
+        ramal = subscribers[0].get("number") if subscribers else None
 
         resultado = registrar_atividade_chamada(
             called=called,
             colaborador=colaborador,
             start_ts=start,
-            end_ts=end
+            end_ts=end,
+            ramal=ramal
         )
         return resultado
 
