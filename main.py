@@ -21,9 +21,14 @@ logging.basicConfig(level=logging.INFO)
 
 BITRIX_WEBHOOK_URL = "https://b24-rwd8iz.bitrix24.com.br/rest/94/as72rxtjh98pszj4"
 
+def normalizar_telefone(telefone: str) -> str:
+    numero = telefone.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+    if numero.startswith("0") and len(numero) >= 11:
+        numero = numero[1:]
+    return numero
 
 def buscar_negocio_por_telefone(telefone: str):
-    telefone = telefone.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+    telefone = normalizar_telefone(telefone)
 
     search_payload = {
         "type": "PHONE",
@@ -64,7 +69,6 @@ def buscar_negocio_por_telefone(telefone: str):
 
     return None
 
-
 def registrar_atividade_chamada(called, colaborador, start_ts, end_ts):
     negocio_id = buscar_negocio_por_telefone(called)
 
@@ -75,17 +79,19 @@ def registrar_atividade_chamada(called, colaborador, start_ts, end_ts):
     start_time_str = datetime.fromtimestamp(start_ts).isoformat()
     end_time_str = datetime.fromtimestamp(end_ts).isoformat()
 
+    telefone_normalizado = normalizar_telefone(called)
+
     activity_payload = {
         "fields": {
             "OWNER_ID": negocio_id,
-            "OWNER_TYPE_ID": 2,  # Deal
-            "TYPE_ID": 2,        # Call
-            "DIRECTION": 2,      # Outgoing
-            "SUBJECT": f"Chamada de {colaborador} para {called}",
+            "OWNER_TYPE_ID": 2,
+            "TYPE_ID": 2,
+            "DIRECTION": 2,
+            "SUBJECT": f"Chamada de {colaborador} para {telefone_normalizado}",
             "COMPLETED": "Y",
             "DESCRIPTION": f"Ligação realizada por {colaborador} via Uniq",
             "DESCRIPTION_TYPE": 1,
-            "COMMUNICATIONS": [{"VALUE": called, "TYPE": "PHONE"}],
+            "COMMUNICATIONS": [{"VALUE": telefone_normalizado, "TYPE": "PHONE"}],
             "START_TIME": start_time_str,
             "END_TIME": end_time_str
         }
@@ -100,7 +106,6 @@ def registrar_atividade_chamada(called, colaborador, start_ts, end_ts):
     except Exception as e:
         logging.error("Erro ao enviar atividade para Bitrix: %s", e)
         return {"status": "bitrix-error", "error": str(e)}
-
 
 @app.post("/webhook")
 async def receive_webhook(request: Request):
