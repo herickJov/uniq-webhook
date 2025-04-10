@@ -14,8 +14,8 @@ OWNER_TYPE_ID_DEAL = 2
 ACTIVITY_TYPE_CALL = 2
 
 @app.post("/webhook")
-def handle_webhook(request: Request):
-    payload = request.json()
+async def handle_webhook(request: Request):
+    payload = await request.json()
     logging.info("Payload recebido: %s", payload)
 
     phone_number = payload.get("caller_id")
@@ -26,7 +26,6 @@ def handle_webhook(request: Request):
     if not phone_number:
         return {"error": "caller_id ausente"}
 
-    # 1. Buscar contatos com esse telefone
     contact_search_response = requests.post(
         BITRIX_WEBHOOK + "crm.contact.list.json",
         headers=HEADERS,
@@ -44,7 +43,6 @@ def handle_webhook(request: Request):
 
     contact_id = contacts[0]["ID"]
 
-    # 2. Buscar negócios vinculados ao contato e usuário
     deal_search_response = requests.post(
         BITRIX_WEBHOOK + "crm.deal.list.json",
         headers=HEADERS,
@@ -67,7 +65,6 @@ def handle_webhook(request: Request):
     deal_id = deals[0]["ID"]
     logging.info("Negócio encontrado: %s", deal_id)
 
-    # 3. Criar atividade ligada ao negócio
     atividade_payload = {
         "fields": {
             "OWNER_ID": deal_id,
