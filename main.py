@@ -28,6 +28,7 @@ async def webhook_handler(request: Request):
     subscribers = payload.get("subscribers", [])
     called = payload.get("called", "")
     times = payload.get("times", {})
+    status = payload.get("status", "Desconhecido")
 
     if not subscribers or not called:
         return {"status": "invalid-payload"}
@@ -78,8 +79,11 @@ async def webhook_handler(request: Request):
             logging.warning(f"Nenhum negócio encontrado para contato {numero} com responsável {bitrix_user_id}")
             return {"status": "no-deal"}
 
-        start = datetime.fromtimestamp(times.get("setup", 0)).isoformat()
-        end = datetime.fromtimestamp(times.get("release", 0)).isoformat()
+        start_ts = times.get("setup", 0)
+        end_ts = times.get("release", 0)
+        start = datetime.fromtimestamp(start_ts).isoformat()
+        end = datetime.fromtimestamp(end_ts).isoformat()
+        duracao = int(end_ts - start_ts) if end_ts > start_ts else 0
 
         activity_payload = {
             "fields": {
@@ -102,7 +106,14 @@ async def webhook_handler(request: Request):
                     }
                 ],
                 "RESPONSIBLE_ID": bitrix_user_id,
-                "DESCRIPTION": f"Ligação registrada automaticamente via Uniq\nContato: {contato_nome}\nNegócio: {negocio_titulo}",
+                "DESCRIPTION": (
+                    f"Ligação registrada automaticamente via Uniq\n"
+                    f"Contato: {contato_nome}\n"
+                    f"Negócio: {negocio_titulo}\n"
+                    f"Atendente: {colaborador}\n"
+                    f"Duração: {duracao} segundos\n"
+                    f"Status: {status}"
+                ),
                 "DESCRIPTION_TYPE": 3,
                 "START_TIME": start,
                 "END_TIME": end,
