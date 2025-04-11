@@ -21,7 +21,7 @@ def normalize_phone(phone):
     if phone.startswith("0"):
         phone = phone[1:]
     if len(phone) == 11:
-        return f"55{phone}"
+        return f"55 {phone[:2]} {phone[2:7]}-{phone[7:]}"
     return phone
 
 @app.post("/webhook")
