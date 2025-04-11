@@ -17,7 +17,12 @@ UNIQ_TO_BITRIX = {
 }
 
 def normalize_phone(phone):
-    return phone.lstrip("0")
+    phone = ''.join(filter(str.isdigit, phone))
+    if phone.startswith("0"):
+        phone = phone[1:]
+    if len(phone) == 11:
+        return f"55{phone}"
+    return phone
 
 @app.post("/webhook")
 async def webhook_handler(request: Request):
