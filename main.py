@@ -111,7 +111,7 @@ async def webhook_handler(request: Request):
             f"Atendente: {colaborador}<br>"
             f"Duração: {duracao} segundos<br>"
             f"Status: {status}<br>"
-            f"<a href='{gravacao_url}' target='_blank'>Ouvir Gravação</a>"
+            f"Gravação: {gravacao_url}"
         )
 
         activity_payload = {
