@@ -71,14 +71,13 @@ async def webhook_handler(request: Request):
     logging.info(f"Número normalizado: {numero}")
 
     try:
-        # REGISTRO NA TELEFONIA DO BITRIX PARA ESTATÍSTICA/BI
         telephony_payload = {
             "USER_ID": bitrix_user_id,
             "PHONE_NUMBER": numero,
             "CALL_START_DATE": datetime.fromtimestamp(times.get("setup", 0)).isoformat(),
             "CALL_DURATION": int(times.get("release", 0) - times.get("setup", 0)),
             "CALL_ID": payload_id,
-            "CALL_TYPE": 2,  # 2 = Outgoing
+            "CALL_TYPE": 2,
             "CRM_CREATE": 0,
             "CRM_ENTITY_TYPE": "CONTACT"
         }
@@ -88,7 +87,19 @@ async def webhook_handler(request: Request):
         )
         logging.info(f"Registro na telefonia: {tel_resp.json()}")
 
-        # CONTATO
+        finish_payload = {
+            "CALL_ID": payload_id,
+            "USER_ID": bitrix_user_id,
+            "DURATION": int(times.get("release", 0) - times.get("setup", 0)),
+            "STATUS_CODE": 200,
+            "RECORD_URL": f"https://admin.uniq.app/recordings/details/{payload_id}"
+        }
+        finish_res = requests.post(
+            f"{BITRIX_WEBHOOK_BASE}/telephony.externalcall.finish.json",
+            json=finish_payload
+        )
+        logging.info(f"Finalização da chamada: {finish_res.json()}")
+
         contatos_res = requests.get(
             f"{BITRIX_WEBHOOK_BASE}/crm.contact.list.json",
             params={"filter[PHONE]": numero, "select[]": ["ID", "NAME"]}
