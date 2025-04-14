@@ -9,14 +9,18 @@ logging.basicConfig(level=logging.INFO)
 BITRIX_WEBHOOK_BASE = "https://b24-rwd8iz.bitrix24.com.br/rest/94/as72rxtjh98pszj4"
 
 UNIQ_TO_BITRIX = {
-    "1529": 36,  # BA
-    "1557": 38,  # BA
-    "1560": 34,  # BA
-    "1520": 30,  # SP
+    "1529": 36,  # SP, FABRICIO
+    "1557": 38,  # SP, PRISCILA
+    "1560": 34,  # BA, JOÃO
+    "1520": 30,  # BA, NELMARA
     "1810": 94   # SP
 }
 
 UNIQ_TO_DDD = {
+    "1529": "11",
+    "1557": "11",
+    "1560": "71",
+    "1520": "71",
     "1810": "11"
 }
 
