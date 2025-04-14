@@ -22,8 +22,6 @@ def normalize_phone(phone):
         phone = phone[1:]
     if not phone.startswith("55"):
         phone = "55" + phone
-    if len(phone) == 13:
-        return f"+{phone[:2]} {phone[2:4]} {phone[4:9]}-{phone[9:]}"
     return f"+{phone}"
 
 @app.post("/webhook")
