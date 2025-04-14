@@ -28,9 +28,7 @@ def normalize_phone(phone, ramal):
     phone = ''.join(filter(str.isdigit, phone))
     if phone.startswith("0"):
         phone = phone[1:]
-    if len(phone) == 8 and ramal in UNIQ_TO_DDD:
-        phone = UNIQ_TO_DDD[ramal] + phone
-    elif len(phone) == 9 and ramal in UNIQ_TO_DDD:
+    if len(phone) in (8, 9) and ramal in UNIQ_TO_DDD:
         phone = UNIQ_TO_DDD[ramal] + phone
     if not phone.startswith("55"):
         phone = "55" + phone
@@ -46,6 +44,7 @@ async def webhook_handler(request: Request):
     called = payload.get("called", "")
     times = payload.get("times", {})
     status = payload.get("status", "Desconhecido")
+    payload_id = payload.get("id")
 
     if not subscribers or not called:
         return {"status": "invalid-payload"}
@@ -103,6 +102,18 @@ async def webhook_handler(request: Request):
         end = datetime.fromtimestamp(end_ts).isoformat()
         duracao = int(end_ts - start_ts) if end_ts > start_ts else 0
 
+        gravacao_url = f"https://admin.uniq.app/recordings/details/{payload_id}"
+
+        descricao = (
+            f"Ligação registrada automaticamente via Uniq<br>"
+            f"Contato: {contato_nome}<br>"
+            f"Negócio: {negocio_titulo}<br>"
+            f"Atendente: {colaborador}<br>"
+            f"Duração: {duracao} segundos<br>"
+            f"Status: {status}<br>"
+            f"<a href='{gravacao_url}' target='_blank'>Ouvir Gravação</a>"
+        )
+
         activity_payload = {
             "fields": {
                 "OWNER_ID": negocio_id,
@@ -124,14 +135,7 @@ async def webhook_handler(request: Request):
                     }
                 ],
                 "RESPONSIBLE_ID": bitrix_user_id,
-                "DESCRIPTION": (
-                    f"Ligação registrada automaticamente via Uniq\n"
-                    f"Contato: {contato_nome}\n"
-                    f"Negócio: {negocio_titulo}\n"
-                    f"Atendente: {colaborador}\n"
-                    f"Duração: {duracao} segundos\n"
-                    f"Status: {status}"
-                ),
+                "DESCRIPTION": descricao,
                 "DESCRIPTION_TYPE": 3,
                 "START_TIME": start,
                 "END_TIME": end,
