@@ -20,9 +20,11 @@ def normalize_phone(phone):
     phone = ''.join(filter(str.isdigit, phone))
     if phone.startswith("0"):
         phone = phone[1:]
-    if len(phone) == 11:
-        return f"+55 {phone[:2]} {phone[2:7]}-{phone[7:]}"
-    return phone
+    if not phone.startswith("55"):
+        phone = "55" + phone
+    if len(phone) == 13:
+        return f"+{phone[:2]} {phone[2:4]} {phone[4:9]}-{phone[9:]}"
+    return f"+{phone}"
 
 @app.post("/webhook")
 async def webhook_handler(request: Request):
@@ -47,6 +49,7 @@ async def webhook_handler(request: Request):
         return {"status": "user-not-mapped"}
 
     numero = normalize_phone(called)
+    logging.info(f"Número normalizado: {numero}")
 
     try:
         contatos_res = requests.get(
