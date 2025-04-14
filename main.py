@@ -9,17 +9,25 @@ logging.basicConfig(level=logging.INFO)
 BITRIX_WEBHOOK_BASE = "https://b24-rwd8iz.bitrix24.com.br/rest/94/as72rxtjh98pszj4"
 
 UNIQ_TO_BITRIX = {
-    "1529": 36,
-    "1557": 38,
-    "1560": 34,
-    "1520": 30,
-    "1810": 94
+    "1529": 36,  # BA
+    "1557": 38,  # BA
+    "1560": 34,  # BA
+    "1520": 30,  # SP
+    "1810": 94   # SP
 }
 
-def normalize_phone(phone):
+UNIQ_TO_DDD = {
+    "1810": "11"
+}
+
+def normalize_phone(phone, ramal):
     phone = ''.join(filter(str.isdigit, phone))
     if phone.startswith("0"):
         phone = phone[1:]
+    if len(phone) == 8 and ramal in UNIQ_TO_DDD:
+        phone = UNIQ_TO_DDD[ramal] + phone
+    elif len(phone) == 9 and ramal in UNIQ_TO_DDD:
+        phone = UNIQ_TO_DDD[ramal] + phone
     if not phone.startswith("55"):
         phone = "55" + phone
     return f"+{phone}"
@@ -46,7 +54,7 @@ async def webhook_handler(request: Request):
         logging.warning(f"Ramal {ramal} não mapeado para usuário Bitrix")
         return {"status": "user-not-mapped"}
 
-    numero = normalize_phone(called)
+    numero = normalize_phone(called, ramal)
     logging.info(f"Número normalizado: {numero}")
 
     try:
