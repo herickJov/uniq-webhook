@@ -9,11 +9,11 @@ logging.basicConfig(level=logging.INFO)
 BITRIX_WEBHOOK_BASE = "https://b24-rwd8iz.bitrix24.com.br/rest/94/as72rxtjh98pszj4"
 
 UNIQ_TO_BITRIX = {
-    "1529": 36,  # SP, FABRICIO
-    "1557": 38,  # SP, PRISCILA
-    "1560": 34,  # BA, JOÃO
-    "1520": 30,  # BA, NELMARA
-    "1810": 94   # SP
+    "1529": 36,
+    "1557": 38,
+    "1560": 34,
+    "1520": 30,
+    "1810": 94
 }
 
 UNIQ_TO_DDD = {
@@ -23,6 +23,8 @@ UNIQ_TO_DDD = {
     "1520": "71",
     "1810": "11"
 }
+
+seen_payload_ids = set()
 
 def normalize_phone(phone, ramal):
     phone = ''.join(filter(str.isdigit, phone))
@@ -45,6 +47,14 @@ async def webhook_handler(request: Request):
     times = payload.get("times", {})
     status = payload.get("status", "Desconhecido")
     payload_id = payload.get("id")
+
+    if not payload_id:
+        return {"status": "missing-id"}
+    if payload_id in seen_payload_ids:
+        logging.warning(f"Chamada duplicada ignorada: {payload_id}")
+        return {"status": "duplicate"}
+
+    seen_payload_ids.add(payload_id)
 
     if not subscribers or not called:
         return {"status": "invalid-payload"}
