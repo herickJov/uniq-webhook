@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request
 import requests
 import logging
 from datetime import datetime
+import uuid
 
 app = FastAPI()
 logging.basicConfig(level=logging.INFO)
@@ -71,13 +72,16 @@ async def webhook_handler(request: Request):
     logging.info(f"Número normalizado: {numero}")
 
     try:
+        # Gerar um UUID único para CALL_ID
+        call_uuid = str(uuid.uuid4())
+
         telephony_payload = {
             "USER_ID": bitrix_user_id,
             "PHONE_NUMBER": numero,
             "CALL_START_DATE": datetime.fromtimestamp(times.get("setup", 0)).isoformat(),
             "CALL_DURATION": int(times.get("release", 0) - times.get("setup", 0)),
-            "CALL_ID": payload_id,
-            "CALL_TYPE": 2,
+            "CALL_ID": call_uuid,  # Usar UUID único
+            "TYPE": 2,  # Corrigido de CALL_TYPE para TYPE
             "CRM_CREATE": 0,
             "CRM_ENTITY_TYPE": "CONTACT"
         }
@@ -85,20 +89,39 @@ async def webhook_handler(request: Request):
             f"{BITRIX_WEBHOOK_BASE}/telephony.externalcall.register.json",
             json=telephony_payload
         )
-        logging.info(f"Registro na telefonia: {tel_resp.json()}")
+        tel_result = tel_resp.json()
+        logging.info(f"Registro na telefonia: {tel_result}")
+
+        # Verificar se o registro foi bem-sucedido
+        if not tel_result.get("result"):
+            logging.error(f"Falha ao registrar chamada: {tel_result.get('error_description')}")
+            return {"status": "telephony-register-failed", "detail": tel_result.get("error_description")}
 
         finish_payload = {
-            "CALL_ID": payload_id,
+            "CALL_ID": call_uuid,  # Usar o mesmo UUID
             "USER_ID": bitrix_user_id,
             "DURATION": int(times.get("release", 0) - times.get("setup", 0)),
             "STATUS_CODE": 200,
-            "RECORD_URL": f"https://admin.uniq.app/recordings/details/{payload_id}"
+            "RECORD_URL": f"https://admin.uniq.app/recordings/details/{payload_id}",
+            "ADD_TO_CHAT": 1  # Adicionar ao histórico do colaborador
         }
         finish_res = requests.post(
             f"{BITRIX_WEBHOOK_BASE}/telephony.externalcall.finish.json",
             json=finish_payload
         )
         logging.info(f"Finalização da chamada: {finish_res.json()}")
+
+        # Adicionar anexação para garantir estatísticas
+        attach_payload = {
+            "CALL_ID": call_uuid,
+            "USER_ID": bitrix_user_id,
+            "RECORD_URL": f"https://admin.uniq.app/recordings/details/{payload_id}"
+        }
+        attach_res = requests.post(
+            f"{BITRIX_WEBHOOK_BASE}/telephony.externalcall.attach.json",
+            json=attach_payload
+        )
+        logging.info(f"Anexação da chamada: {attach_res.json()}")
 
         contatos_res = requests.get(
             f"{BITRIX_WEBHOOK_BASE}/crm.contact.list.json",
