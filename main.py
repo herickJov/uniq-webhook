@@ -2,12 +2,11 @@ from fastapi import FastAPI, Request
 import requests
 import logging
 from datetime import datetime
-import uuid
 
 app = FastAPI()
 logging.basicConfig(level=logging.INFO)
 
-BITRIX_WEBHOOK_BASE = "https://b24-rwd8iz.bitrix24.com.br/rest/94/as72rxtjh98pszj4"
+BIT eitherIX_WEBHOOK_BASE = "https://b24-rwd8iz.bitrix24.com.br/rest/94/as72rxtjh98pszj4"
 
 UNIQ_TO_BITRIX = {
     "1529": 36,
@@ -68,20 +67,23 @@ async def webhook_handler(request: Request):
         logging.warning(f"Ramal {ramal} não mapeado para usuário Bitrix")
         return {"status": "user-not-mapped"}
 
+    # Verificar se a chamada é de saída (EGRESS)
+    call_direction = next((s.get("direction") for s in payload.get("sessions", []) if s.get("subscriber") == f"user:{subscribers[0].get('id').split(':')[1]}"), "EGRESS")
+    if call_direction != "EGRESS":
+        logging.info(f"Chamada de entrada ignorada: {payload_id}")
+        return {"status": "ignored-inbound"}
+
     numero = normalize_phone(called, ramal)
     logging.info(f"Número normalizado: {numero}")
 
     try:
-        # Gerar um UUID único para CALL_ID
-        call_uuid = str(uuid.uuid4())
-
         telephony_payload = {
             "USER_ID": bitrix_user_id,
             "PHONE_NUMBER": numero,
             "CALL_START_DATE": datetime.fromtimestamp(times.get("setup", 0)).isoformat(),
             "CALL_DURATION": int(times.get("release", 0) - times.get("setup", 0)),
-            "CALL_ID": call_uuid,  # Usar UUID único
-            "TYPE": 2,  # Corrigido de CALL_TYPE para TYPE
+            "CALL_ID": payload_id,
+            "TYPE": 2,  # Fixo para chamadas de saída
             "CRM_CREATE": 0,
             "CRM_ENTITY_TYPE": "CONTACT"
         }
@@ -92,36 +94,31 @@ async def webhook_handler(request: Request):
         tel_result = tel_resp.json()
         logging.info(f"Registro na telefonia: {tel_result}")
 
-        # Verificar se o registro foi bem-sucedido
         if not tel_result.get("result"):
             logging.error(f"Falha ao registrar chamada: {tel_result.get('error_description')}")
             return {"status": "telephony-register-failed", "detail": tel_result.get("error_description")}
 
+        # Usar o CALL_ID retornado pelo Bitrix24
+        bitrix_call_id = tel_result["result"]["CALL_ID"]
+
         finish_payload = {
-            "CALL_ID": call_uuid,  # Usar o mesmo UUID
+            "CALL_ID": bitrix_call_id,
             "USER_ID": bitrix_user_id,
             "DURATION": int(times.get("release", 0) - times.get("setup", 0)),
             "STATUS_CODE": 200,
             "RECORD_URL": f"https://admin.uniq.app/recordings/details/{payload_id}",
-            "ADD_TO_CHAT": 1  # Adicionar ao histórico do colaborador
+            "ADD_TO_CHAT": 1
         }
         finish_res = requests.post(
             f"{BITRIX_WEBHOOK_BASE}/telephony.externalcall.finish.json",
             json=finish_payload
         )
-        logging.info(f"Finalização da chamada: {finish_res.json()}")
+        finish_result = finish_res.json()
+        logging.info(f"Finalização da chamada: {finish_result}")
 
-        # Adicionar anexação para garantir estatísticas
-        attach_payload = {
-            "CALL_ID": call_uuid,
-            "USER_ID": bitrix_user_id,
-            "RECORD_URL": f"https://admin.uniq.app/recordings/details/{payload_id}"
-        }
-        attach_res = requests.post(
-            f"{BITRIX_WEBHOOK_BASE}/telephony.externalcall.attach.json",
-            json=attach_payload
-        )
-        logging.info(f"Anexação da chamada: {attach_res.json()}")
+        if not finish_result.get("result"):
+            logging.error(f"Falha ao finalizar chamada: {finish_result.get('error_description')}")
+            return {"status": "telephony-finish-failed", "detail": finish_result.get("error_description")}
 
         contatos_res = requests.get(
             f"{BITRIX_WEBHOOK_BASE}/crm.contact.list.json",
@@ -202,7 +199,7 @@ async def webhook_handler(request: Request):
                 "START_TIME": start,
                 "END_TIME": end,
                 "COMPLETED": "Y",
-                "DIRECTION": 2
+                "DIRECTION": 2  # Fixo para chamadas de saída
             }
         }
 
