@@ -67,12 +67,6 @@ async def webhook_handler(request: Request):
         logging.warning(f"Ramal {ramal} não mapeado para usuário Bitrix")
         return {"status": "user-not-mapped"}
 
-    # Verificar se a chamada é de saída (EGRESS)
-    call_direction = next((s.get("direction") for s in payload.get("sessions", []) if s.get("subscriber") == f"user:{subscribers[0].get('id').split(':')[1]}"), "EGRESS")
-    if call_direction != "EGRESS":
-        logging.info(f"Chamada de entrada ignorada: {payload_id}")
-        return {"status": "ignored-inbound"}
-
     numero = normalize_phone(called, ramal)
     logging.info(f"Número normalizado: {numero}")
 
@@ -83,7 +77,7 @@ async def webhook_handler(request: Request):
             "CALL_START_DATE": datetime.fromtimestamp(times.get("setup", 0)).isoformat(),
             "CALL_DURATION": int(times.get("release", 0) - times.get("setup", 0)),
             "CALL_ID": payload_id,
-            "TYPE": 2,  # Fixo para chamadas de saída
+            "TYPE": 2,  # Tratado como chamada de saída
             "CRM_CREATE": 0,
             "CRM_ENTITY_TYPE": "CONTACT"
         }
@@ -199,7 +193,7 @@ async def webhook_handler(request: Request):
                 "START_TIME": start,
                 "END_TIME": end,
                 "COMPLETED": "Y",
-                "DIRECTION": 2  # Fixo para chamadas de saída
+                "DIRECTION": 2  # Tratado como chamada de saída
             }
         }
 
