@@ -172,7 +172,7 @@ async def webhook_handler(request: Request):
         end = datetime.fromtimestamp(end_ts).isoformat()
         duracao_segundos = int(duration)
         duracao_minutos = duracao_segundos // 60
-        duracao_display = f"{duracao_minutos} minutos" if duracao_segundos >= 60 else "< 1 minuto"
+        duracao_display = f"{duracao_minutos} minutos" if duracao_segundos >= 60 else f"{duracao_segundos} segundos"
 
         gravacao_url = f"https://admin.uniq.app/recordings/details/{payload_id}"
 
