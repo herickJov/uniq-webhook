@@ -43,7 +43,6 @@ async def webhook_handler(request: Request):
 
     payload = data.get("payload", {})
     subscribers = payload.get("subscribers", [])
-    called = payload.get("called", "")
     times = payload.get("times", {})
     status = payload.get("status", "Desconhecido")
     payload_id = payload.get("id")
@@ -56,7 +55,7 @@ async def webhook_handler(request: Request):
 
     seen_payload_ids.add(payload_id)
 
-    if not subscribers or not called:
+    if not subscribers:
         return {"status": "invalid-payload"}
 
     # Identificar o colaborador pelo ramal (type: user)
@@ -80,18 +79,18 @@ async def webhook_handler(request: Request):
         return {"status": "remote-not-found"}
 
     remote_number = remote_info.get("number", "")
+    if not remote_number:
+        logging.warning("Número remoto não encontrado")
+        return {"status": "remote-number-not-found"}
 
-    # Normalizar números
-    caller_number = normalize_phone(ramal, ramal)  # Número do colaborador (origem)
+    # Normalizar o número remoto
     numero = normalize_phone(remote_number, ramal)  # Número remoto (destino)
-    logging.info(f"Número normalizado (origem - colaborador): {caller_number}")
     logging.info(f"Número normalizado (destino - remoto): {numero}")
 
     try:
         telephony_payload = {
             "USER_ID": bitrix_user_id,
             "PHONE_NUMBER": numero,  # Número de destino (remoto)
-            "CALLER_PHONE_NUMBER": caller_number,  # Número de origem (colaborador)
             "CALL_START_DATE": datetime.fromtimestamp(times.get("setup", 0)).isoformat(),
             "CALL_DURATION": int(times.get("release", 0) - times.get("setup", 0)),
             "CALL_ID": payload_id,
