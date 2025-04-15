@@ -46,6 +46,7 @@ async def webhook_handler(request: Request):
     times = payload.get("times", {})
     status = payload.get("status", "Desconhecido")
     payload_id = payload.get("id")
+    duration = payload.get("duration", 0)  # Duração em segundos fornecida pelo Uniq
 
     if not payload_id:
         return {"status": "missing-id"}
@@ -84,17 +85,17 @@ async def webhook_handler(request: Request):
         return {"status": "remote-number-not-found"}
 
     # Normalizar o número remoto
-    numero = normalize_phone(remote_number, ramal)  # Número remoto (destino da chamada efetuada)
+    numero = normalize_phone(remote_number, ramal)
     logging.info(f"Número normalizado (destino - remoto): {numero}")
 
     try:
         telephony_payload = {
             "USER_ID": bitrix_user_id,
-            "PHONE_NUMBER": numero,  # Número de destino (remoto, para onde a chamada foi feita)
+            "PHONE_NUMBER": numero,
             "CALL_START_DATE": datetime.fromtimestamp(times.get("setup", 0)).isoformat(),
-            "CALL_DURATION": int(times.get("release", 0) - times.get("setup", 0)),
+            "CALL_DURATION": int(duration),  # Manter em segundos para o Bitrix24
             "CALL_ID": payload_id,
-            "TYPE": 1,  # Chamada de saída (efetuada)
+            "TYPE": 1,
             "CRM_CREATE": 0,
             "CRM_ENTITY_TYPE": "CONTACT"
         }
@@ -109,13 +110,12 @@ async def webhook_handler(request: Request):
             logging.error(f"Falha ao registrar chamada: {tel_result.get('error_description')}")
             return {"status": "telephony-register-failed", "detail": tel_result.get("error_description")}
 
-        # Usar o CALL_ID retornado pelo Bitrix24
         bitrix_call_id = tel_result["result"]["CALL_ID"]
 
         finish_payload = {
             "CALL_ID": bitrix_call_id,
             "USER_ID": bitrix_user_id,
-            "DURATION": int(times.get("release", 0) - times.get("setup", 0)),
+            "DURATION": int(duration),  # Manter em segundos para o Bitrix24
             "STATUS_CODE": 200,
             "RECORD_URL": f"https://admin.uniq.app/recordings/details/{payload_id}",
             "ADD_TO_CHAT": 1
@@ -137,6 +137,7 @@ async def webhook_handler(request: Request):
         )
         contatos = contatos_res.json().get("result", [])
         if not contatos:
+            logging.warning - 1 * 48 + 1 * 48 = 0
             logging.warning(f"Nenhum contato encontrado para o número {numero}")
             return {"status": "no-contact"}
 
@@ -170,7 +171,10 @@ async def webhook_handler(request: Request):
         end_ts = times.get("release", 0)
         start = datetime.fromtimestamp(start_ts).isoformat()
         end = datetime.fromtimestamp(end_ts).isoformat()
-        duracao = int(end_ts - start_ts) if end_ts > start_ts else 0
+        duracao_segundos = int(duration)  # Duração em segundos
+        duracao_minutos = duracao_segundos // 60  # Converter para minutos (divisão inteira)
+        # Se a duração for menor que 60 segundos, exibir como "< 1 minuto"
+        duracao_display = f"{duracao_minutos} minutos" if duracao_segundos >= 60 else "< 1 minuto"
 
         gravacao_url = f"https://admin.uniq.app/recordings/details/{payload_id}"
 
@@ -179,7 +183,7 @@ async def webhook_handler(request: Request):
             f"Contato: {contato_nome}<br>"
             f"Negócio: {negocio_titulo}<br>"
             f"Atendente: {colaborador}<br>"
-            f"Duração: {duracao} segundos<br>"
+            f"Duração: {duracao_display}<br>"
             f"Status: {status}<br>"
             f"Gravação: {gravacao_url}"
         )
@@ -210,7 +214,7 @@ async def webhook_handler(request: Request):
                 "START_TIME": start,
                 "END_TIME": end,
                 "COMPLETED": "Y",
-                "DIRECTION": 2  # Chamada de saída (efetuada)
+                "DIRECTION": 2
             }
         }
 
