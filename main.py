@@ -94,7 +94,7 @@ async def webhook_handler(request: Request):
             "CALL_START_DATE": datetime.fromtimestamp(times.get("setup", 0)).isoformat(),
             "CALL_DURATION": int(times.get("release", 0) - times.get("setup", 0)),
             "CALL_ID": payload_id,
-            "TYPE": 2,  # Chamada de saída (efetuada)
+            "TYPE": 1,  # Chamada de saída (efetuada)
             "CRM_CREATE": 0,
             "CRM_ENTITY_TYPE": "CONTACT"
         }
