@@ -6,7 +6,7 @@ from datetime import datetime
 app = FastAPI()
 logging.basicConfig(level=logging.INFO)
 
-BIT eitherIX_WEBHOOK_BASE = "https://b24-rwd8iz.bitrix24.com.br/rest/94/as72rxtjh98pszj4"
+BITRIX_WEBHOOK_BASE = "https://b24-rwd8iz.bitrix24.com.br/rest/94/as72rxtjh98pszj4"
 
 UNIQ_TO_BITRIX = {
     "1529": 36,
