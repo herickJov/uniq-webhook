@@ -59,25 +59,43 @@ async def webhook_handler(request: Request):
     if not subscribers or not called:
         return {"status": "invalid-payload"}
 
-    colaborador = subscribers[0].get("display", "Desconhecido")
-    ramal = subscribers[0].get("number", "")
+    # Identificar o colaborador pelo ramal (type: user)
+    colaborador_info = next((sub for sub in subscribers if sub.get("type") == "user"), None)
+    if not colaborador_info:
+        logging.warning("Nenhum colaborador com type 'user' encontrado")
+        return {"status": "user-not-found"}
+
+    colaborador = colaborador_info.get("display", "Desconhecido")
+    ramal = colaborador_info.get("number", "")
     bitrix_user_id = UNIQ_TO_BITRIX.get(ramal)
 
     if not bitrix_user_id:
         logging.warning(f"Ramal {ramal} não mapeado para usuário Bitrix")
         return {"status": "user-not-mapped"}
 
-    numero = normalize_phone(called, ramal)
-    logging.info(f"Número normalizado: {numero}")
+    # Identificar o número remoto (type: remote)
+    remote_info = next((sub for sub in subscribers if sub.get("type") == "remote"), None)
+    if not remote_info:
+        logging.warning("Nenhum subscriber remoto encontrado")
+        return {"status": "remote-not-found"}
+
+    remote_number = remote_info.get("number", "")
+
+    # Normalizar números
+    caller_number = normalize_phone(ramal, ramal)  # Número do colaborador (origem)
+    numero = normalize_phone(remote_number, ramal)  # Número remoto (destino)
+    logging.info(f"Número normalizado (origem - colaborador): {caller_number}")
+    logging.info(f"Número normalizado (destino - remoto): {numero}")
 
     try:
         telephony_payload = {
             "USER_ID": bitrix_user_id,
-            "PHONE_NUMBER": numero,
+            "PHONE_NUMBER": numero,  # Número de destino (remoto)
+            "CALLER_PHONE_NUMBER": caller_number,  # Número de origem (colaborador)
             "CALL_START_DATE": datetime.fromtimestamp(times.get("setup", 0)).isoformat(),
             "CALL_DURATION": int(times.get("release", 0) - times.get("setup", 0)),
             "CALL_ID": payload_id,
-            "TYPE": 2,  # Tratado como chamada de saída
+            "TYPE": 2,  # Chamada de saída
             "CRM_CREATE": 0,
             "CRM_ENTITY_TYPE": "CONTACT"
         }
@@ -193,7 +211,7 @@ async def webhook_handler(request: Request):
                 "START_TIME": start,
                 "END_TIME": end,
                 "COMPLETED": "Y",
-                "DIRECTION": 2  # Tratado como chamada de saída
+                "DIRECTION": 2  # Chamada de saída
             }
         }
 
