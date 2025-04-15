@@ -84,17 +84,17 @@ async def webhook_handler(request: Request):
         return {"status": "remote-number-not-found"}
 
     # Normalizar o número remoto
-    numero = normalize_phone(remote_number, ramal)  # Número remoto (destino)
+    numero = normalize_phone(remote_number, ramal)  # Número remoto (destino da chamada efetuada)
     logging.info(f"Número normalizado (destino - remoto): {numero}")
 
     try:
         telephony_payload = {
             "USER_ID": bitrix_user_id,
-            "PHONE_NUMBER": numero,  # Número de destino (remoto)
+            "PHONE_NUMBER": numero,  # Número de destino (remoto, para onde a chamada foi feita)
             "CALL_START_DATE": datetime.fromtimestamp(times.get("setup", 0)).isoformat(),
             "CALL_DURATION": int(times.get("release", 0) - times.get("setup", 0)),
             "CALL_ID": payload_id,
-            "TYPE": 2,  # Chamada de saída
+            "TYPE": 2,  # Chamada de saída (efetuada)
             "CRM_CREATE": 0,
             "CRM_ENTITY_TYPE": "CONTACT"
         }
@@ -210,7 +210,7 @@ async def webhook_handler(request: Request):
                 "START_TIME": start,
                 "END_TIME": end,
                 "COMPLETED": "Y",
-                "DIRECTION": 2  # Chamada de saída
+                "DIRECTION": 2  # Chamada de saída (efetuada)
             }
         }
 
