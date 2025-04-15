@@ -46,7 +46,7 @@ async def webhook_handler(request: Request):
     times = payload.get("times", {})
     status = payload.get("status", "Desconhecido")
     payload_id = payload.get("id")
-    duration = payload.get("duration", 0)  # Duração em segundos fornecida pelo Uniq
+    duration = payload.get("duration", 0)
 
     if not payload_id:
         return {"status": "missing-id"}
@@ -93,7 +93,7 @@ async def webhook_handler(request: Request):
             "USER_ID": bitrix_user_id,
             "PHONE_NUMBER": numero,
             "CALL_START_DATE": datetime.fromtimestamp(times.get("setup", 0)).isoformat(),
-            "CALL_DURATION": int(duration),  # Manter em segundos para o Bitrix24
+            "CALL_DURATION": int(duration),
             "CALL_ID": payload_id,
             "TYPE": 1,
             "CRM_CREATE": 0,
@@ -115,7 +115,7 @@ async def webhook_handler(request: Request):
         finish_payload = {
             "CALL_ID": bitrix_call_id,
             "USER_ID": bitrix_user_id,
-            "DURATION": int(duration),  # Manter em segundos para o Bitrix24
+            "DURATION": int(duration),
             "STATUS_CODE": 200,
             "RECORD_URL": f"https://admin.uniq.app/recordings/details/{payload_id}",
             "ADD_TO_CHAT": 1
@@ -137,7 +137,6 @@ async def webhook_handler(request: Request):
         )
         contatos = contatos_res.json().get("result", [])
         if not contatos:
-            logging.warning - 1 * 48 + 1 * 48 = 0
             logging.warning(f"Nenhum contato encontrado para o número {numero}")
             return {"status": "no-contact"}
 
@@ -171,9 +170,8 @@ async def webhook_handler(request: Request):
         end_ts = times.get("release", 0)
         start = datetime.fromtimestamp(start_ts).isoformat()
         end = datetime.fromtimestamp(end_ts).isoformat()
-        duracao_segundos = int(duration)  # Duração em segundos
-        duracao_minutos = duracao_segundos // 60  # Converter para minutos (divisão inteira)
-        # Se a duração for menor que 60 segundos, exibir como "< 1 minuto"
+        duracao_segundos = int(duration)
+        duracao_minutos = duracao_segundos // 60
         duracao_display = f"{duracao_minutos} minutos" if duracao_segundos >= 60 else "< 1 minuto"
 
         gravacao_url = f"https://admin.uniq.app/recordings/details/{payload_id}"
