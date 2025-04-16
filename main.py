@@ -97,7 +97,7 @@ async def webhook_handler(request: Request):
             "CALL_DURATION": int(duration),
             "CALL_ID": payload_id,
             "TYPE": 1,
-            "SHOW": 0
+	    "SHOW": 0
         }
         tel_resp = requests.post(
             f"{BITRIX_WEBHOOK_BASE}/telephony.externalcall.register.json",
@@ -123,25 +123,6 @@ async def webhook_handler(request: Request):
             f"{BITRIX_WEBHOOK_BASE}/telephony.externalcall.finish.json",
             json=finish_payload
         )
-
-        # Apaga atividade automática gerada
-        auto_acts = requests.get(
-            f"{BITRIX_WEBHOOK_BASE}/crm.activity.list.json",
-            params={
-                "filter[CALL_ID]": payload_id,
-                "filter[TYPE_ID]": 2,
-                "filter[DIRECTION]": 2,
-                "select[]": ["ID"]
-            }
-        ).json().get("result", [])
-
-        for act in auto_acts:
-            act_id = act["ID"]
-            delete_res = requests.post(
-                f"{BITRIX_WEBHOOK_BASE}/crm.activity.delete.json",
-                json={"ID": act_id}
-            )
-            logging.info(f"Atividade automática excluída: {delete_res.json()}")
 
         contatos_res = requests.get(
             f"{BITRIX_WEBHOOK_BASE}/crm.contact.list.json",
