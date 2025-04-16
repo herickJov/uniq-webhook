@@ -97,7 +97,7 @@ async def webhook_handler(request: Request):
             "CALL_DURATION": int(duration),
             "CALL_ID": payload_id,
             "TYPE": 1,
-            "SHOW": 0
+	    "SHOW": 0
         }
         tel_resp = requests.post(
             f"{BITRIX_WEBHOOK_BASE}/telephony.externalcall.register.json",
@@ -184,32 +184,42 @@ async def webhook_handler(request: Request):
             f"<br>Status: {status_custom}"
         )
 
-        # Localiza a atividade automática gerada pelo Bitrix via telephony
-        activity_list_res = requests.get(
-            f"{BITRIX_WEBHOOK_BASE}/crm.activity.list.json",
-            params={
-                "filter[CALL_ID]": payload_id,
-                "filter[TYPE_ID]": 2,
-                "filter[DIRECTION]": 2,
-                "select[]": ["ID"]
-            }
-        )
-        atividades = activity_list_res.json().get("result", [])
-
-        if atividades:
-            atividade_id = atividades[0]['ID']
-            update_res = requests.post(
-                f"{BITRIX_WEBHOOK_BASE}/crm.activity.update.json",
-                json={
-                    "ID": atividade_id,
-                    "fields": {
-                        "DESCRIPTION": descricao,
-                        "DESCRIPTION_TYPE": 3
+        activity_payload = {
+            "fields": {
+                "OWNER_ID": negocio_id,
+                "OWNER_TYPE_ID": 2,
+                "TYPE_ID": 2,
+                "SUBJECT": f"Ligação via Uniq de {colaborador} para {numero}",
+                "COMMUNICATIONS": [
+                    {
+                        "VALUE": numero,
+                        "TYPE": "PHONE",
+                        "ENTITY_TYPE_ID": 3,
+                        "ENTITY_ID": contato_id
                     }
-                }
-            )
-            logging.info(f"Atividade atualizada: {update_res.json()}")
+                ],
+                "BINDINGS": [
+                    {
+                        "OWNER_ID": negocio_id,
+                        "OWNER_TYPE_ID": 2
+                    }
+                ],
+                "RESPONSIBLE_ID": bitrix_user_id,
+                "DESCRIPTION": descricao,
+                "DESCRIPTION_TYPE": 3,
+                "START_TIME": start,
+                "END_TIME": end,
+                "COMPLETED": "Y",
+                "DIRECTION": 2
+            }
+        }
 
+        activity_res = requests.post(
+            f"{BITRIX_WEBHOOK_BASE}/crm.activity.add.json",
+            json=activity_payload
+        )
+
+        logging.info(f"Atividade registrada: {activity_res.json()}")
         return {"status": "ok"}
 
     except Exception as e:
