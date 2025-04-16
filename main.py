@@ -1,5 +1,5 @@
-
 # Patch status only in description logic
+
 from fastapi import FastAPI, Request
 import requests
 import logging
@@ -97,7 +97,7 @@ async def webhook_handler(request: Request):
             "CALL_DURATION": int(duration),
             "CALL_ID": payload_id,
             "TYPE": 1,
-            "SHOW": 0
+	    "SHOW": 0
         }
         tel_resp = requests.post(
             f"{BITRIX_WEBHOOK_BASE}/telephony.externalcall.register.json",
@@ -135,23 +135,80 @@ async def webhook_handler(request: Request):
         contato_id = int(contatos[0]['ID'])
         contato_nome = contatos[0]['NAME']
 
-        descricao = f"Ligação registrada automaticamente via Uniq<br>Contato: {contato_nome}<br>Atendente: {colaborador}<br>Duração: {int(duration)} segundos"
+        negocios_res = requests.get(
+            f"{BITRIX_WEBHOOK_BASE}/crm.deal.list.json",
+            params={
+                "filter[CONTACT_ID]": contato_id,
+                "filter[ASSIGNED_BY_ID]": bitrix_user_id,
+                "filter[STAGE_SEMANTIC_ID]": "P",
+                "select[]": ["ID", "TITLE", "ASSIGNED_BY_ID"]
+            }
+        )
+        negocios = negocios_res.json().get("result", [])
+
+        negocio_id = None
+        negocio_titulo = ""
+        for deal in negocios:
+            if str(deal.get("ASSIGNED_BY_ID")) == str(bitrix_user_id):
+                negocio_id = int(deal['ID'])
+                negocio_titulo = deal['TITLE']
+                break
+
+        if not negocio_id:
+            return {"status": "no-deal"}
+
+        start_ts = times.get("setup", 0)
+        end_ts = times.get("release", 0)
+        start = datetime.fromtimestamp(start_ts).isoformat()
+        end = datetime.fromtimestamp(end_ts).isoformat()
+        duracao_segundos = int(duration)
+        duracao_minutos = duracao_segundos // 60
+        duracao_display = f"{duracao_minutos} minutos" if duracao_segundos >= 60 else f"{duracao_segundos} segundos"
+
+        gravacao_url = f"https://admin.uniq.app/recordings/details/{payload_id}"
+
+        if duracao_segundos == 0:
+            status_custom = "Incompleta"
+        elif 1 <= duracao_segundos <= 4:
+            status_custom = "Caixa postal"
+        else:
+            status_custom = "Efetuada"
+
+        descricao = (
+            f"Ligação registrada automaticamente via Uniq<br>"
+            f"Contato: {contato_nome}<br>"
+            f"Negócio: {negocio_titulo}<br>"
+            f"Atendente: {colaborador}<br>"
+            f"Duração: {duracao_display}<br>"
+            f"Gravação: {gravacao_url}<br>"
+            f"<br>Status: {status_custom}"
+        )
 
         activity_payload = {
             "fields": {
-                "OWNER_ID": contato_id,
-                "OWNER_TYPE_ID": 3,
+                "OWNER_ID": negocio_id,
+                "OWNER_TYPE_ID": 2,
                 "TYPE_ID": 2,
                 "SUBJECT": f"Ligação via Uniq de {colaborador} para {numero}",
-                "COMMUNICATIONS": [{
-                    "VALUE": numero,
-                    "TYPE": "PHONE",
-                    "ENTITY_TYPE_ID": 3,
-                    "ENTITY_ID": contato_id
-                }],
+                "COMMUNICATIONS": [
+                    {
+                        "VALUE": numero,
+                        "TYPE": "PHONE",
+                        "ENTITY_TYPE_ID": 3,
+                        "ENTITY_ID": contato_id
+                    }
+                ],
+                "BINDINGS": [
+                    {
+                        "OWNER_ID": negocio_id,
+                        "OWNER_TYPE_ID": 2
+                    }
+                ],
                 "RESPONSIBLE_ID": bitrix_user_id,
                 "DESCRIPTION": descricao,
                 "DESCRIPTION_TYPE": 3,
+                "START_TIME": start,
+                "END_TIME": end,
                 "COMPLETED": "Y",
                 "DIRECTION": 2
             }
@@ -162,28 +219,9 @@ async def webhook_handler(request: Request):
             json=activity_payload
         )
 
-        activity_data = activity_res.json()
-        if not activity_data.get("result"):
-            return {"status": "activity-add-failed"}
-
-        activity_id = activity_data["result"]
-
-        update_payload = {
-            "ID": activity_id,
-            "fields": {
-                "DESCRIPTION": descricao
-            }
-        }
-        update_res = requests.post(
-            f"{BITRIX_WEBHOOK_BASE}/crm.activity.update.json",
-            json=update_payload
-        )
-
-        logging.info(f"Atividade atualizada: {update_res.json()}")
-
+        logging.info(f"Atividade registrada: {activity_res.json()}")
         return {"status": "ok"}
 
     except Exception as e:
         logging.error(f"Erro: {e}")
         return {"status": "error", "detail": str(e)}
-
