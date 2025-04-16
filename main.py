@@ -186,3 +186,4 @@ async def webhook_handler(request: Request):
     except Exception as e:
         logging.error(f"Erro: {e}")
         return {"status": "error", "detail": str(e)}
+
