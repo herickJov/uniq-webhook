@@ -97,7 +97,7 @@ async def webhook_handler(request: Request):
             "CALL_DURATION": int(duration),
             "CALL_ID": payload_id,
             "TYPE": 1,
-	    "SHOW": 0
+            "SHOW": 0
         }
         tel_resp = requests.post(
             f"{BITRIX_WEBHOOK_BASE}/telephony.externalcall.register.json",
@@ -107,7 +107,8 @@ async def webhook_handler(request: Request):
         logging.info(f"Registro na telefonia: {tel_result}")
 
         if not tel_result.get("result"):
-            return {"status": "telephony-register-failed"}
+            logging.error(f"Falha ao registrar chamada: {tel_result.get('error_description')}")
+            return {"status": "telephony-register-failed", "detail": tel_result.get("error_description")}
 
         bitrix_call_id = tel_result["result"]["CALL_ID"]
 
@@ -119,10 +120,16 @@ async def webhook_handler(request: Request):
             "RECORD_URL": f"https://admin.uniq.app/recordings/details/{payload_id}",
             "ADD_TO_CHAT": 0
         }
-        requests.post(
+        finish_res = requests.post(
             f"{BITRIX_WEBHOOK_BASE}/telephony.externalcall.finish.json",
             json=finish_payload
         )
+        finish_result = finish_res.json()
+        logging.info(f"Finalização da chamada: {finish_result}")
+
+        if not finish_result.get("result"):
+            logging.error(f"Falha ao finalizar chamada: {finish_result.get('error_description')}")
+            return {"status": "telephony-finish-failed", "detail": finish_result.get("error_description")}
 
         contatos_res = requests.get(
             f"{BITRIX_WEBHOOK_BASE}/crm.contact.list.json",
@@ -130,6 +137,7 @@ async def webhook_handler(request: Request):
         )
         contatos = contatos_res.json().get("result", [])
         if not contatos:
+            logging.warning(f"Nenhum contato encontrado para o número {numero}")
             return {"status": "no-contact"}
 
         contato_id = int(contatos[0]['ID'])
@@ -155,7 +163,37 @@ async def webhook_handler(request: Request):
                 break
 
         if not negocio_id:
+            logging.warning(f"Nenhum negócio encontrado para contato {numero} com responsável {bitrix_user_id}")
             return {"status": "no-deal"}
+
+        # Localizar a atividade automática gerada pelo telephony.externalcall.finish
+        activities_res = requests.get(
+            f"{BITRIX_WEBHOOK_BASE}/crm.activity.list.json",
+            params={
+                "filter[OWNER_TYPE_ID]": 2,  # Negócio
+                "filter[OWNER_ID]": negocio_id,
+                "filter[ASSOCIATED_ENTITY_ID]": bitrix_call_id,  # Vinculada ao CALL_ID
+                "filter[TYPE_ID]": 2,  # Chamada telefônica
+            }
+        )
+        activities = activities_res.json().get("result", [])
+        logging.info(f"Atividades encontradas: {activities}")
+
+        for activity in activities:
+            activity_id = activity.get("ID")
+            subject = activity.get("SUBJECT", "")
+            # Evitar excluir a atividade personalizada que criaremos
+            if "via Uniq" not in subject:  # Nossa atividade personalizada tem "via Uniq" no título
+                # Excluir a atividade automática
+                delete_res = requests.post(
+                    f"{BITRIX_WEBHOOK_BASE}/crm.activity.delete.json",
+                    json={"id": activity_id}
+                )
+                delete_result = delete_res.json()
+                logging.info(f"Exclusão da atividade automática: {delete_result}")
+                if not delete_result.get("result"):
+                    logging.error(f"Falha ao excluir atividade: {delete_result.get('error_description')}")
+                    return {"status": "activity-delete-failed", "detail": delete_result.get("error_description")}
 
         start_ts = times.get("setup", 0)
         end_ts = times.get("release", 0)
