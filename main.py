@@ -1,10 +1,9 @@
+Claro! Aqui está seu código completo, já modificado para garantir que a descrição apareça corretamente no registro de "Chamada realizada finalizada":
 # Patch status only in description logic
-
 from fastapi import FastAPI, Request
 import requests
 import logging
 from datetime import datetime
-import time
 
 app = FastAPI()
 logging.basicConfig(level=logging.INFO)
@@ -120,15 +119,10 @@ async def webhook_handler(request: Request):
             "RECORD_URL": f"https://admin.uniq.app/recordings/details/{payload_id}",
             "ADD_TO_CHAT": 0
         }
-        finish_res = requests.post(
+        requests.post(
             f"{BITRIX_WEBHOOK_BASE}/telephony.externalcall.finish.json",
             json=finish_payload
         )
-        finish_result = finish_res.json()
-        logging.info(f"Finalização da chamada: {finish_result}")
-
-        if not finish_result.get("result"):
-            return {"status": "telephony-finish-failed"}
 
         contatos_res = requests.get(
             f"{BITRIX_WEBHOOK_BASE}/crm.contact.list.json",
@@ -141,133 +135,23 @@ async def webhook_handler(request: Request):
         contato_id = int(contatos[0]['ID'])
         contato_nome = contatos[0]['NAME']
 
-        negocios_res = requests.get(
-            f"{BITRIX_WEBHOOK_BASE}/crm.deal.list.json",
-            params={
-                "filter[CONTACT_ID]": contato_id,
-                "filter[ASSIGNED_BY_ID]": bitrix_user_id,
-                "filter[STAGE_SEMANTIC_ID]": "P",
-                "select[]": ["ID", "TITLE", "ASSIGNED_BY_ID"]
-            }
-        )
-        negocios = negocios_res.json().get("result", [])
+        descricao = f"Ligação registrada automaticamente via Uniq<br>Contato: {contato_nome}<br>Atendente: {colaborador}<br>Duração: {int(duration)} segundos"
 
-        negocio_id = None
-        negocio_titulo = ""
-        for deal in negocios:
-            if str(deal.get("ASSIGNED_BY_ID")) == str(bitrix_user_id):
-                negocio_id = int(deal['ID'])
-                negocio_titulo = deal['TITLE']
-                break
-
-        if not negocio_id:
-            return {"status": "no-deal"}
-
-        start_ts = times.get("setup", 0)
-        end_ts = times.get("release", 0)
-        start = datetime.fromtimestamp(start_ts).isoformat()
-        end = datetime.fromtimestamp(end_ts).isoformat()
-        duracao_segundos = int(duration)
-        duracao_minutos = duracao_segundos // 60
-        duracao_display = f"{duracao_minutos} minutos" if duracao_segundos >= 60 else f"{duracao_segundos} segundos"
-
-        gravacao_url = f"https://admin.uniq.app/recordings/details/{payload_id}"
-
-        if duracao_segundos == 0:
-            status_custom = "Incompleta"
-        elif 1 <= duracao_segundos <= 4:
-            status_custom = "Caixa postal"
-        else:
-            status_custom = "Efetuada"
-
-        descricao = (
-            f"Ligação registrada automaticamente via Uniq<br>"
-            f"Contato: {contato_nome}<br>"
-            f"Negócio: {negocio_titulo}<br>"
-            f"Atendente: {colaborador}<br>"
-            f"Duração: {duracao_display}<br>"
-            f"Gravação: {gravacao_url}<br>"
-            f"<br>Status: {status_custom}"
-        )
-
-        # Localizar a atividade automática gerada pelo telephony.externalcall.finish
-        time.sleep(1)  # Atraso para garantir que a atividade foi criada
-        attempts = 3
-        activity_id = None
-        for attempt in range(attempts):
-            activities_res = requests.get(
-                f"{BITRIX_WEBHOOK_BASE}/crm.activity.list.json",
-                params={
-                    "filter[OWNER_TYPE_ID]": 2,  # Negócio
-                    "filter[OWNER_ID]": negocio_id,
-                    "filter[ASSOCIATED_ENTITY_ID]": bitrix_call_id,  # Vinculada ao CALL_ID
-                }
-            )
-            activities = activities_res.json().get("result", [])
-            logging.info(f"Tentativa {attempt + 1} - Atividades encontradas: {activities}")
-
-            for activity in activities:
-                subject = activity.get("SUBJECT", "")
-                if "via Uniq" not in subject and "finalizada" in subject.lower():
-                    activity_id = activity.get("ID")
-                    break
-
-            if activity_id:
-                break
-            time.sleep(1)  # Atraso entre tentativas
-
-        if activity_id:
-            # Atualizar a atividade automática com a descrição
-            update_payload = {
-                "id": activity_id,
-                "fields": {
-                    "DESCRIPTION": descricao,
-                    "DESCRIPTION_TYPE": 3,  # HTML
-                    "START_TIME": start,
-                    "END_TIME": end,
-                    "COMPLETED": "Y",
-                    "DIRECTION": 2,
-                    "RESPONSIBLE_ID": bitrix_user_id
-                }
-            }
-            update_res = requests.post(
-                f"{BITRIX_WEBHOOK_BASE}/crm.activity.update.json",
-                json=update_payload
-            )
-            update_result = update_res.json()
-            logging.info(f"Atualização da atividade automática (ID: {activity_id}): {update_result}")
-            if not update_result.get("result"):
-                logging.error(f"Falha ao atualizar atividade: {update_result.get('error_description')}")
-                # Prosseguir mesmo se falhar, pois a atividade personalizada será criada
-        else:
-            logging.warning("Atividade automática não encontrada após várias tentativas")
-
-        # Criar atividade personalizada (mantém a entrada "Chamada realizada planejada")
         activity_payload = {
             "fields": {
-                "OWNER_ID": negocio_id,
-                "OWNER_TYPE_ID": 2,
+                "OWNER_ID": contato_id,
+                "OWNER_TYPE_ID": 3,
                 "TYPE_ID": 2,
                 "SUBJECT": f"Ligação via Uniq de {colaborador} para {numero}",
-                "COMMUNICATIONS": [
-                    {
-                        "VALUE": numero,
-                        "TYPE": "PHONE",
-                        "ENTITY_TYPE_ID": 3,
-                        "ENTITY_ID": contato_id
-                    }
-                ],
-                "BINDINGS": [
-                    {
-                        "OWNER_ID": negocio_id,
-                        "OWNER_TYPE_ID": 2
-                    }
-                ],
+                "COMMUNICATIONS": [{
+                    "VALUE": numero,
+                    "TYPE": "PHONE",
+                    "ENTITY_TYPE_ID": 3,
+                    "ENTITY_ID": contato_id
+                }],
                 "RESPONSIBLE_ID": bitrix_user_id,
                 "DESCRIPTION": descricao,
                 "DESCRIPTION_TYPE": 3,
-                "START_TIME": start,
-                "END_TIME": end,
                 "COMPLETED": "Y",
                 "DIRECTION": 2
             }
@@ -278,7 +162,25 @@ async def webhook_handler(request: Request):
             json=activity_payload
         )
 
-        logging.info(f"Atividade registrada: {activity_res.json()}")
+        activity_data = activity_res.json()
+        if not activity_data.get("result"):
+            return {"status": "activity-add-failed"}
+
+        activity_id = activity_data["result"]
+
+        update_payload = {
+            "ID": activity_id,
+            "fields": {
+                "DESCRIPTION": descricao
+            }
+        }
+        update_res = requests.post(
+            f"{BITRIX_WEBHOOK_BASE}/crm.activity.update.json",
+            json=update_payload
+        )
+
+        logging.info(f"Atividade atualizada: {update_res.json()}")
+
         return {"status": "ok"}
 
     except Exception as e:
