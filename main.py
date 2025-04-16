@@ -118,7 +118,7 @@ async def webhook_handler(request: Request):
             "DURATION": int(duration),
             "STATUS_CODE": 200,
             "RECORD_URL": f"https://admin.uniq.app/recordings/details/{payload_id}",
-            "ADD_TO_CHAT": 1
+            "ADD_TO_CHAT": 0
         }
         finish_res = requests.post(
             f"{BITRIX_WEBHOOK_BASE}/telephony.externalcall.finish.json",
