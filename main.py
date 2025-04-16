@@ -97,6 +97,8 @@ async def webhook_handler(request: Request):
             "CALL_DURATION": int(duration),
             "CALL_ID": payload_id,
             "TYPE": 1,
+	    "CRM_ENTITY_TYPE": "",
+	    "CRM_ENTITY_ID": ""
         }
         tel_resp = requests.post(
             f"{BITRIX_WEBHOOK_BASE}/telephony.externalcall.register.json",
