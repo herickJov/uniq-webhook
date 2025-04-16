@@ -89,10 +89,14 @@ async def webhook_handler(request: Request):
     logging.info(f"Número normalizado (destino - remoto): {numero}")
 
     try:
+        # Ajustar o timestamp para as estatísticas (adicionar 3 horas = 10800 segundos)
+        setup_ts = times.get("setup", 0)
+        setup_ts_adjusted = setup_ts + 10800  # Adicionar 3 horas para as estatísticas
+
         telephony_payload = {
             "USER_ID": bitrix_user_id,
             "PHONE_NUMBER": numero,
-            "CALL_START_DATE": datetime.fromtimestamp(times.get("setup", 0)).isoformat(),
+            "CALL_START_DATE": datetime.fromtimestamp(setup_ts_adjusted).isoformat(),
             "CALL_DURATION": int(duration),
             "CALL_ID": payload_id,
             "TYPE": 1,
@@ -168,10 +172,8 @@ async def webhook_handler(request: Request):
 
         start_ts = times.get("setup", 0)
         end_ts = times.get("release", 0)
-	start_ts_brt = start_ts + 10800
-	end_ts_brt = end_ts + 10800
-        start = datetime.fromtimestamp(start_ts_brt).isoformat()
-        end = datetime.fromtimestamp(end_ts_brt).isoformat()
+        start = datetime.fromtimestamp(start_ts).isoformat()
+        end = datetime.fromtimestamp(end_ts).isoformat()
         duracao_segundos = int(duration)
         duracao_minutos = duracao_segundos // 60
         duracao_display = f"{duracao_minutos} minutos" if duracao_segundos >= 60 else f"{duracao_segundos} segundos"
