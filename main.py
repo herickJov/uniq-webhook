@@ -1,3 +1,5 @@
+# Patch status only in description logic
+
 from fastapi import FastAPI, Request
 import requests
 import logging
@@ -44,7 +46,6 @@ async def webhook_handler(request: Request):
     payload = data.get("payload", {})
     subscribers = payload.get("subscribers", [])
     times = payload.get("times", {})
-    status = payload.get("status", "Desconhecido")
     payload_id = payload.get("id")
     duration = payload.get("duration", 0)
 
@@ -59,7 +60,6 @@ async def webhook_handler(request: Request):
     if not subscribers:
         return {"status": "invalid-payload"}
 
-    # Identificar o colaborador pelo ramal (type: user)
     colaborador_info = next((sub for sub in subscribers if sub.get("type") == "user"), None)
     if not colaborador_info:
         logging.warning("Nenhum colaborador com type 'user' encontrado")
@@ -73,7 +73,6 @@ async def webhook_handler(request: Request):
         logging.warning(f"Ramal {ramal} não mapeado para usuário Bitrix")
         return {"status": "user-not-mapped"}
 
-    # Identificar o número remoto (type: remote)
     remote_info = next((sub for sub in subscribers if sub.get("type") == "remote"), None)
     if not remote_info:
         logging.warning("Nenhum subscriber remoto encontrado")
@@ -84,14 +83,12 @@ async def webhook_handler(request: Request):
         logging.warning("Número remoto não encontrado")
         return {"status": "remote-number-not-found"}
 
-    # Normalizar o número remoto
     numero = normalize_phone(remote_number, ramal)
     logging.info(f"Número normalizado (destino - remoto): {numero}")
 
     try:
-        # Ajustar o timestamp para as estatísticas (adicionar 3 horas = 10800 segundos)
         setup_ts = times.get("setup", 0)
-        setup_ts_adjusted = setup_ts + 10800  # Adicionar 3 horas para as estatísticas
+        setup_ts_adjusted = setup_ts + 10800
 
         telephony_payload = {
             "USER_ID": bitrix_user_id,
@@ -109,8 +106,7 @@ async def webhook_handler(request: Request):
         logging.info(f"Registro na telefonia: {tel_result}")
 
         if not tel_result.get("result"):
-            logging.error(f"Falha ao registrar chamada: {tel_result.get('error_description')}")
-            return {"status": "telephony-register-failed", "detail": tel_result.get("error_description")}
+            return {"status": "telephony-register-failed"}
 
         bitrix_call_id = tel_result["result"]["CALL_ID"]
 
@@ -122,16 +118,10 @@ async def webhook_handler(request: Request):
             "RECORD_URL": f"https://admin.uniq.app/recordings/details/{payload_id}",
             "ADD_TO_CHAT": 0
         }
-        finish_res = requests.post(
+        requests.post(
             f"{BITRIX_WEBHOOK_BASE}/telephony.externalcall.finish.json",
             json=finish_payload
         )
-        finish_result = finish_res.json()
-        logging.info(f"Finalização da chamada: {finish_result}")
-
-        if not finish_result.get("result"):
-            logging.error(f"Falha ao finalizar chamada: {finish_result.get('error_description')}")
-            return {"status": "telephony-finish-failed", "detail": finish_result.get("error_description")}
 
         contatos_res = requests.get(
             f"{BITRIX_WEBHOOK_BASE}/crm.contact.list.json",
@@ -139,7 +129,6 @@ async def webhook_handler(request: Request):
         )
         contatos = contatos_res.json().get("result", [])
         if not contatos:
-            logging.warning(f"Nenhum contato encontrado para o número {numero}")
             return {"status": "no-contact"}
 
         contato_id = int(contatos[0]['ID'])
@@ -165,7 +154,6 @@ async def webhook_handler(request: Request):
                 break
 
         if not negocio_id:
-            logging.warning(f"Nenhum negócio encontrado para contato {numero} com responsável {bitrix_user_id}")
             return {"status": "no-deal"}
 
         start_ts = times.get("setup", 0)
@@ -178,14 +166,21 @@ async def webhook_handler(request: Request):
 
         gravacao_url = f"https://admin.uniq.app/recordings/details/{payload_id}"
 
+        if duracao_segundos == 0:
+            status_custom = "Incompleta"
+        elif 1 <= duracao_segundos <= 4:
+            status_custom = "Caixa postal"
+        else:
+            status_custom = "Efetuada"
+
         descricao = (
             f"Ligação registrada automaticamente via Uniq<br>"
             f"Contato: {contato_nome}<br>"
             f"Negócio: {negocio_titulo}<br>"
             f"Atendente: {colaborador}<br>"
             f"Duração: {duracao_display}<br>"
-            f"Status: {status}<br>"
-            f"Gravação: {gravacao_url}"
+            f"Gravação: {gravacao_url}<br>"
+            f"<br>Status: {status_custom}"
         )
 
         activity_payload = {
@@ -224,9 +219,6 @@ async def webhook_handler(request: Request):
         )
 
         logging.info(f"Atividade registrada: {activity_res.json()}")
-        logging.info(f"Contato: {contato_nome} | ID: {contato_id} | Responsável: {bitrix_user_id}")
-        logging.info(f"Negócio usado: {negocio_titulo} | ID: {negocio_id}")
-
         return {"status": "ok"}
 
     except Exception as e:
