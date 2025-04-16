@@ -168,8 +168,10 @@ async def webhook_handler(request: Request):
 
         start_ts = times.get("setup", 0)
         end_ts = times.get("release", 0)
-        start = datetime.fromtimestamp(start_ts).isoformat()
-        end = datetime.fromtimestamp(end_ts).isoformat()
+	start_ts_brt = start_ts + 10800
+	end_ts_brt = end_ts + 10800
+        start = datetime.fromtimestamp(start_ts_brt).isoformat()
+        end = datetime.fromtimestamp(end_ts_brt).isoformat()
         duracao_segundos = int(duration)
         duracao_minutos = duracao_segundos // 60
         duracao_display = f"{duracao_minutos} minutos" if duracao_segundos >= 60 else f"{duracao_segundos} segundos"
