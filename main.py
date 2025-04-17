@@ -101,7 +101,7 @@ async def webhook_handler(request: Request):
             "CALL_DURATION": int(duration),
             "CALL_ID": payload_id,
             "TYPE": 1,
-	    "SHOW": 0
+            "SHOW": 0
         }
         tel_resp = requests.post(
             f"{BITRIX_WEBHOOK_BASE}/telephony.externalcall.register.json",
@@ -133,6 +133,17 @@ async def webhook_handler(request: Request):
             params={"filter[PHONE]": numero, "select[]": ["ID", "NAME"]}
         )
         contatos = contatos_res.json().get("result", [])
+
+        # fallback: tentar sem o +55 se nenhum contato encontrado
+        if not contatos:
+            numero_fallback = numero[-11:]  # usa apenas DDD + número
+            logging.info(f"Tentando fallback com número: {numero_fallback}")
+            contatos_res = requests.get(
+                f"{BITRIX_WEBHOOK_BASE}/crm.contact.list.json",
+                params={"filter[PHONE]": numero_fallback, "select[]": ["ID", "NAME"]}
+            )
+            contatos = contatos_res.json().get("result", [])
+
         if not contatos:
             return {"status": "no-contact"}
 
@@ -179,12 +190,12 @@ async def webhook_handler(request: Request):
             status_custom = "Efetuada"
 
         descricao = (
-            f"Ligação registrada automaticamente via Uniq<br>"
+            f"Ligacao registrada automaticamente via Uniq<br>"
             f"Contato: {contato_nome}<br>"
-            f"Negócio: {negocio_titulo}<br>"
+            f"Negocio: {negocio_titulo}<br>"
             f"Atendente: {colaborador}<br>"
-            f"Duração: {duracao_display}<br>"
-            f"Gravação: {gravacao_url}<br>"
+            f"Duracao: {duracao_display}<br>"
+            f"Gravacao: {gravacao_url}<br>"
             f"<br>Status: {status_custom}"
         )
 
@@ -193,7 +204,7 @@ async def webhook_handler(request: Request):
                 "OWNER_ID": negocio_id,
                 "OWNER_TYPE_ID": 2,
                 "TYPE_ID": 2,
-                "SUBJECT": f"Ligação via Uniq de {colaborador} para {numero}",
+                "SUBJECT": f"Ligacao via Uniq de {colaborador} para {numero}",
                 "COMMUNICATIONS": [
                     {
                         "VALUE": numero,
